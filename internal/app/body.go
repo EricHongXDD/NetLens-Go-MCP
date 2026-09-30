@@ -13,7 +13,7 @@ type BodyInput struct {
 	Limit  int    `json:"limit,omitempty"`
 }
 
-// Body 是显式的完整正文读取入口，普通详情、HAR 与日志仍使用脱敏视图。
+// Body 是显式的完整正文读取入口，普通详情、HAR 与日志也返回真实值，正文预览受展示限额约束。
 func (s *Service) Body(in BodyInput) (any, error) {
 	if in.ID == "" {
 		return nil, errors.New("id is required")

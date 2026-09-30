@@ -35,7 +35,7 @@ func isolatedProxyManager(dir string) *systemproxy.Manager {
 
 func writeTestResult(path string, testErr error) error {
 	result := map[string]any{"success": testErr == nil, "version": model.Version,
-		"checks": []string{"native_window", "native_layout", "styled_controls", "upstream_chain", "proxy_capture", "redacted_details", "full_body", "native_filtering", "pause_resume", "har_export", "no_web_ui", "service_shutdown", "proxy_restore", "mcp_config", "ai_guide"}}
+		"checks": []string{"native_window", "native_layout", "styled_controls", "upstream_chain", "proxy_capture", "raw_details", "full_body", "native_filtering", "pause_resume", "har_export", "no_web_ui", "service_shutdown", "proxy_restore", "mcp_config", "ai_guide"}}
 	if testErr != nil {
 		result["error"] = testErr.Error()
 	}
@@ -151,8 +151,8 @@ func (w *window) selfTest() error {
 	w.fullBody.SetChecked(false)
 	w.selectFlow()
 	detail := w.json.Text() + w.request.Text() + w.response.Text()
-	if !strings.Contains(detail, "REDACTED") || strings.Contains(detail, "desktop-fixture-secret") {
-		return errors.New("native details did not redact fixture credentials")
+	if strings.Contains(detail, "[REDACTED]") || !strings.Contains(w.request.Text(), "Bearer desktop-fixture-secret") || !strings.Contains(w.json.Text(), "desktop-fixture-secret") {
+		return errors.New("native details did not retain original authorization")
 	}
 	w.url.SetText("/not-matched")
 	w.applyFilter()
@@ -189,7 +189,7 @@ func (w *window) selfTest() error {
 		return err
 	}
 	data, err := os.ReadFile(path)
-	if err != nil || !json.Valid(data) || strings.Contains(string(data), "desktop-fixture-secret") {
+	if err != nil || !json.Valid(data) || !strings.Contains(string(data), "desktop-fixture-secret") {
 		return errors.New("desktop HAR export failed validation")
 	}
 	controlTransport := &http.Transport{}

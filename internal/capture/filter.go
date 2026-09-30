@@ -1,4 +1,4 @@
-// Package capture stores bounded traffic snapshots and builds redacted public views.
+// Package capture 保存有界流量快照，并生成保留真实值的公开视图。
 package capture
 
 import (

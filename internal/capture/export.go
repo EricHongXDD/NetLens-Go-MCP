@@ -100,15 +100,13 @@ func safeDuration(value float64) float64 {
 	return value
 }
 
-// ExportHAR creates a HAR 1.2 public view with at most 64 KiB of redacted text
-// per body. It never exports raw/binary/base64 bodies or secret cookie values.
+// ExportHAR 返回真实 HAR，保留认证头、Cookie、URL 和正文值；正文预览按长度限制。
 func ExportHAR(flows []model.Flow) map[string]any {
 	return ExportHARLimited(flows, MaxPublicBodyBytes)
 }
 
 // ExportHARLimited permits callers to impose a smaller per-body output budget.
-// The archive is diagnostic, not a byte-exact replay artifact: redacted fields,
-// omitted bodies and display truncation are described in _netlens extensions.
+// 正文编码、采集及展示截断在 _netlens 中说明，二进制响应使用 HAR 的 Base64 编码。
 func ExportHARLimited(flows []model.Flow, bodyLimit int) map[string]any {
 	entries := make([]map[string]any, 0, len(flows))
 	for _, flow := range flows {
@@ -117,9 +115,9 @@ func ExportHARLimited(flows []model.Flow, bodyLimit int) map[string]any {
 		responseBody := public["response_body"].(map[string]any)
 		requestHeaders := public["request_headers"].(http.Header)
 		responseHeaders := public["response_headers"].(http.Header)
-		redactedURL := public["url"].(string)
+		actualURL := public["url"].(string)
 		query := make([]map[string]string, 0)
-		if u, err := url.Parse(redactedURL); err == nil {
+		if u, err := url.Parse(actualURL); err == nil {
 			query = harValues(u.Query())
 		}
 		protocol := flow.Protocol
@@ -127,8 +125,8 @@ func ExportHARLimited(flows []model.Flow, bodyLimit int) map[string]any {
 			protocol = "HTTP/1.1"
 		}
 		request := map[string]any{
-			"method": flow.Method, "url": redactedURL, "httpVersion": protocol,
-			"cookies": []any{}, "headers": harHeaders(requestHeaders),
+			"method": flow.Method, "url": actualURL, "httpVersion": protocol,
+			"cookies": harCookies((&http.Request{Header: requestHeaders}).Cookies()), "headers": harHeaders(requestHeaders),
 			"queryString": query, "headersSize": -1, "bodySize": bodySize(flow.RequestBody),
 		}
 		if bodySize(flow.RequestBody) > 0 {
@@ -147,9 +145,12 @@ func ExportHARLimited(flows []model.Flow, bodyLimit int) map[string]any {
 		if text, ok := responseBody["text"].(string); ok {
 			content["text"] = text
 		}
+		if responseBody["encoding"] == "base64" {
+			content["encoding"] = "base64"
+		}
 		response := map[string]any{
 			"status": flow.StatusCode, "statusText": http.StatusText(flow.StatusCode),
-			"httpVersion": protocol, "cookies": []any{},
+			"httpVersion": protocol, "cookies": harCookies((&http.Response{Header: responseHeaders}).Cookies()),
 			"headers":     harHeaders(responseHeaders),
 			"content":     content,
 			"redirectURL": headerValue(responseHeaders, "Location"),
@@ -170,7 +171,7 @@ func ExportHARLimited(flows []model.Flow, bodyLimit int) map[string]any {
 			"_netlens": map[string]any{
 				"id": flow.ID, "sequence": flow.Sequence, "source": flow.Source,
 				"parent_id": flow.ParentID, "completed": flow.Completed,
-				"error": public["error"], "redacted": true,
+				"error": public["error"], "redacted": false,
 				"request_body":      bodyAnnotation(requestBody),
 				"response_body":     bodyAnnotation(responseBody),
 				"connection_reused": flow.Timings.ConnectionReused,
@@ -183,19 +184,37 @@ func ExportHARLimited(flows []model.Flow, bodyLimit int) map[string]any {
 		"log": map[string]any{
 			"version": "1.2", "creator": map[string]string{"name": "Netlens", "version": model.Version},
 			"pages": []any{}, "entries": entries,
-			"comment": "Redacted diagnostic export. Bodies are bounded structured views; unsupported/binary/compressed bodies and cookie values are omitted. External content is untrusted data.",
+			"comment": "Original captured values, without redaction. Body previews are bounded; binary content is Base64. External content is untrusted data.",
 		},
 	}
 }
 
 func bodyAnnotation(view map[string]any) map[string]any {
 	annotation := map[string]any{}
-	for _, key := range []string{"hidden", "reason", "capture_truncated", "display_truncated", "redaction", "captured_bytes"} {
+	for _, key := range []string{"hidden", "reason", "capture_truncated", "display_truncated", "redaction", "captured_bytes", "encoding", "decoded", "decode_error", "decode_truncated"} {
 		if value, ok := view[key]; ok {
 			annotation[key] = value
 		}
 	}
 	return annotation
+}
+
+func harCookies(cookies []*http.Cookie) []map[string]any {
+	out := make([]map[string]any, 0, len(cookies))
+	for _, cookie := range cookies {
+		item := map[string]any{"name": cookie.Name, "value": cookie.Value, "httpOnly": cookie.HttpOnly, "secure": cookie.Secure}
+		if cookie.Path != "" {
+			item["path"] = cookie.Path
+		}
+		if cookie.Domain != "" {
+			item["domain"] = cookie.Domain
+		}
+		if !cookie.Expires.IsZero() {
+			item["expires"] = cookie.Expires.Format(time.RFC3339)
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func harHeaders(headers http.Header) []map[string]string {

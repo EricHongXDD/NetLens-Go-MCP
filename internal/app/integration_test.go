@@ -123,16 +123,16 @@ func integrationDecode[T any](t *testing.T, result *mcp.CallToolResult) T {
 	return value
 }
 
-func integrationNoSecrets(t *testing.T, result *mcp.CallToolResult, secrets ...string) string {
+func integrationResultText(t *testing.T, result *mcp.CallToolResult) string {
 	t.Helper()
 	b, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(b)
-	for _, secret := range append(secrets, integrationToken) {
+	for _, secret := range []string{integrationToken} {
 		if secret != "" && strings.Contains(text, secret) {
-			t.Fatalf("public tool result exposed a fixture credential")
+			t.Fatalf("工具结果意外包含 NetLens 控制令牌")
 		}
 	}
 	return text
@@ -242,7 +242,7 @@ func TestIntegrationControlAccess(t *testing.T) {
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	session, ctx := h.connectMCP(t)
-	integrationNoSecrets(t, integrationCall(t, ctx, session, "capture_status", map[string]any{}, false))
+	integrationResultText(t, integrationCall(t, ctx, session, "capture_status", map[string]any{}, false))
 }
 
 func TestIntegrationDefaultMutationGates(t *testing.T) {
@@ -261,13 +261,13 @@ func TestIntegrationDefaultMutationGates(t *testing.T) {
 	}
 	flow := integrationFlows(t, ctx, session, 1).Items[0]
 	replay := integrationCall(t, ctx, session, "requests_replay", map[string]any{"flow_id": flow.ID, "confirm": true}, true)
-	if !strings.Contains(integrationNoSecrets(t, replay), "disabled") || hits.Load() != 1 {
+	if !strings.Contains(integrationResultText(t, replay), "disabled") || hits.Load() != 1 {
 		t.Fatal("default replay gate did not stop the upstream request")
 	}
 	u, _ := url.Parse(upstream.URL)
 	rule := model.Rule{ID: "blocked-mock", Enabled: true, Match: model.RuleMatch{Hosts: []string{u.Host}}, Action: model.RuleAction{Mock: &model.MockResponse{Status: 503, Body: "mock"}}}
 	rules := integrationCall(t, ctx, session, "rules_replace", map[string]any{"rules": []model.Rule{rule}}, true)
-	if !strings.Contains(integrationNoSecrets(t, rules), "disabled") {
+	if !strings.Contains(integrationResultText(t, rules), "disabled") {
 		t.Fatal("default rules gate did not report disabled")
 	}
 	status, _, body := integrationRequest(t, h, http.MethodGet, upstream.URL+"/gate", "", nil)
@@ -309,7 +309,6 @@ func TestIntegrationMCPProxyInvestigation(t *testing.T) {
 
 	const requestBody = `{"token":"request-body-secret-193","note":"visible-request-note"}`
 	const responseBody = `{"access_token":"response-body-secret-472","nested":{"password":"nested-password-672"},"message":"visible-response-message"}`
-	secrets := []string{"request-body-secret-193", "response-body-secret-472", "nested-password-672", "url-token-572", "header-auth-349", "header-api-key-293", "cookie-secret-821"}
 	var hits atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
@@ -333,7 +332,7 @@ func TestIntegrationMCPProxyInvestigation(t *testing.T) {
 	for _, req := range []struct{ method, path string }{{"POST", "/kept"}, {"GET", "/skipped"}, {"GET", "/kept?access_token=url-token-572"}} {
 		status, headers, body := integrationRequest(t, h, req.method, upstream.URL+req.path, "", credentials)
 		if status != http.StatusOK || body != responseBody || !strings.Contains(headers.Get("Set-Cookie"), "cookie-secret-821") {
-			t.Fatal("capture filtering or public redaction changed forwarded traffic")
+			t.Fatal("采集过滤改变了实际转发内容")
 		}
 	}
 	flows := integrationFlows(t, ctx, session, 1)
@@ -342,11 +341,11 @@ func TestIntegrationMCPProxyInvestigation(t *testing.T) {
 		t.Fatal("capture filter did not retain only its matching request")
 	}
 	for _, name := range []string{"flows_list", "flows_stats"} {
-		integrationNoSecrets(t, integrationCall(t, ctx, session, name, map[string]any{}, false), secrets...)
+		integrationResultText(t, integrationCall(t, ctx, session, name, map[string]any{}, false))
 	}
 	get := integrationCall(t, ctx, session, "flows_get", map[string]any{"id": sourceID}, false)
-	if !strings.Contains(integrationNoSecrets(t, get, secrets...), "visible-response-message") {
-		t.Fatal("redaction hid the entire supported JSON response instead of retaining diagnostic content")
+	if !strings.Contains(integrationResultText(t, get), "visible-response-message") {
+		t.Fatal("真实 JSON 响应未保留诊断字段")
 	}
 
 	integrationCall(t, ctx, session, "capture_configure", map[string]any{"enabled": false}, false)
@@ -363,10 +362,10 @@ func TestIntegrationMCPProxyInvestigation(t *testing.T) {
 	flows = integrationFlows(t, ctx, session, 2)
 	postID := flows.Items[0].ID
 	postView := integrationCall(t, ctx, session, "flows_get", map[string]any{"id": postID}, false)
-	if !strings.Contains(integrationNoSecrets(t, postView, secrets...), "visible-request-note") {
-		t.Fatal("clearing capture filter or structured request-body redaction failed")
+	if !strings.Contains(integrationResultText(t, postView), "visible-request-note") {
+		t.Fatal("清除采集过滤或读取原始请求正文失败")
 	}
-	integrationNoSecrets(t, integrationCall(t, ctx, session, "flows_export_har", map[string]any{}, false), secrets...)
+	integrationResultText(t, integrationCall(t, ctx, session, "flows_export_har", map[string]any{}, false))
 
 	// A confirmation failure and a cross-origin override must produce no request.
 	integrationCall(t, ctx, session, "requests_replay", map[string]any{"flow_id": sourceID, "confirm": false}, true)
@@ -378,17 +377,16 @@ func TestIntegrationMCPProxyInvestigation(t *testing.T) {
 		t.Fatal("replay confirmation/origin policy allowed a forbidden request")
 	}
 	replayed := integrationCall(t, ctx, session, "requests_replay", map[string]any{"flow_id": sourceID, "confirm": true}, false)
-	integrationNoSecrets(t, replayed, secrets...)
+	integrationResultText(t, replayed)
 	replayView := integrationDecode[map[string]any](t, replayed)
 	if hits.Load() != 6 || replayView["parent_id"] != sourceID || replayView["source"] != "replay" || replayView["completed"] != true {
 		t.Fatalf("replay did not create one completed linked request: hits=%d view=%+v", hits.Load(), replayView)
 	}
 	flows = integrationFlows(t, ctx, session, 3)
 	replayID := replayView["id"].(string)
-	integrationNoSecrets(t, integrationCall(t, ctx, session, "flows_compare", map[string]any{"left_id": sourceID, "right_id": replayID}, false), secrets...)
+	integrationResultText(t, integrationCall(t, ctx, session, "flows_compare", map[string]any{"left_id": sourceID, "right_id": replayID}, false))
 
-	// Enable one host-bounded mock and prove that matching requests never reach
-	// the upstream. Rule listings are subject to the same secret redaction.
+	// 启用限定主机的 Mock，确认匹配请求不会到达上游；规则列表返回原始配置。
 	const mockBody = `{"token":"mock-body-secret-931","message":"synthetic-response"}`
 	rule := model.Rule{
 		ID: "simulate-unavailable", Enabled: true,
@@ -403,7 +401,7 @@ func TestIntegrationMCPProxyInvestigation(t *testing.T) {
 		if name == "rules_replace" {
 			args["rules"] = []model.Rule{rule}
 		}
-		integrationNoSecrets(t, integrationCall(t, ctx, session, name, args, false), "mock-body-secret-931", "rule-secret-362")
+		integrationResultText(t, integrationCall(t, ctx, session, name, args, false))
 	}
 	status, headers, body := integrationRequest(t, h, http.MethodGet, upstream.URL+"/mock", "", nil)
 	if status != http.StatusServiceUnavailable || body != mockBody || headers.Get("X-Mock-Source") != "netlens" || hits.Load() != 6 {
@@ -476,7 +474,7 @@ func TestIntegrationInvalidHeaderRulesPreserveExistingRules(t *testing.T) {
 			valid.ID = "would-replace-existing"
 			invalid := model.Rule{ID: "invalid-header", Enabled: true, Match: original.Match, Action: tc.action}
 			result := integrationCall(t, ctx, session, "rules_replace", map[string]any{"rules": []model.Rule{valid, invalid}}, true)
-			if !strings.Contains(integrationNoSecrets(t, result), "control character") {
+			if !strings.Contains(integrationResultText(t, result), "control character") {
 				t.Fatal("invalid HTTP header value was not rejected explicitly")
 			}
 			if got := h.service.Rules(); !reflect.DeepEqual(got, before) {
@@ -506,7 +504,7 @@ func TestIntegrationReplayFailureReceiptWhenCapturePaused(t *testing.T) {
 	connect := integrationCall(t, ctx, session, "requests_replay", map[string]any{
 		"flow_id": source.ID, "confirm": true, "overrides": map[string]any{"method": "CONNECT"},
 	}, true)
-	connectText := integrationNoSecrets(t, connect)
+	connectText := integrationResultText(t, connect)
 	if !strings.Contains(connectText, "other than CONNECT") || strings.Contains(connectText, "flow_id=") || hits.Load() != 1 {
 		t.Fatalf("CONNECT was not clearly rejected before attempting a request: %s", connectText)
 	}

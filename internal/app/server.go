@@ -345,7 +345,7 @@ func (s *Service) api(w http.ResponseWriter, r *http.Request) {
 		}
 		v, err := s.Export(ExportInput{Filter: q.Filter, Limit: q.Limit, BodyLimit: 8192})
 		if err == nil {
-			w.Header().Set("Content-Disposition", `attachment; filename="netlens-redacted.har"`)
+			w.Header().Set("Content-Disposition", `attachment; filename="netlens.har"`)
 		}
 		writeJSON(w, v, err)
 	default:

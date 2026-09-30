@@ -89,11 +89,8 @@ func New(opts Options) (*Store, error) {
 	return s, nil
 }
 
-// Put stores an internal raw snapshot. Only completed snapshots are appended to
-// the optional redacted JSONL journal. The journal is an append-only history of
-// completed upserts, so an ID can appear more than once after a final revision.
-// A snapshot larger than the entire byte budget is dropped without retaining
-// an outdated version of that same ID. Persistence never controls forwarding.
+// Put 保存原始快照；可选 JSONL 仅追加完成记录，同一 ID 的最终修订可以重复出现。
+// 超出总内存预算时丢弃该记录及旧版本，持久化不影响转发。
 func (s *Store) Put(flow model.Flow) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -118,8 +115,7 @@ func (s *Store) Put(flow model.Flow) {
 			s.remove(previous)
 		}
 		s.oversized++
-		// Skip copying an oversized snapshot into the cache. Its redacted
-		// final view may still fit the independently bounded journal.
+		// 超大记录不复制进缓存，真实值预览仍可能符合独立日志预算。
 		if flow.Completed {
 			s.appendLog(flow)
 		}
@@ -156,7 +152,7 @@ func (s *Store) remove(item *entry) {
 	s.bytes -= item.bytes
 }
 
-// Get 返回独立原始快照；常规接口使用脱敏视图，完整正文接口显式标记未脱敏。
+// Get 返回独立原始快照；所有接口保留真实值，正文预览与完整分页入口分别限制输出长度。
 func (s *Store) Get(id string) (model.Flow, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -167,9 +163,8 @@ func (s *Store) Get(id string) (model.Flow, bool) {
 	return cloneFlow(item.flow), true
 }
 
-// Query returns redacted summaries newest first. Matched counts matching
-// records below the optional cursor. A new insertion cannot shift a cursor
-// page because cursors use a monotonically increasing insertion sequence.
+// Query 返回由新到旧的真实摘要，Matched 统计游标以下的匹配记录。
+// 游标采用单调递增插入序号，新增记录不会使已有分页发生位移。
 func (s *Store) Query(query model.Query) model.QueryResult {
 	limit := query.Limit
 	if limit <= 0 {
@@ -197,8 +192,7 @@ func (s *Store) Query(query model.Query) model.QueryResult {
 	return result
 }
 
-// Snapshot returns deep-copied raw matching flows in oldest-first sequence
-// order, suitable for internal aggregation and redacted export helpers.
+// Snapshot 按由旧到新的顺序返回匹配记录的独立原始副本，供统计和真实值导出使用。
 func (s *Store) Snapshot(filter model.Filter) []model.Flow {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -285,7 +279,7 @@ func (s *Store) Info() map[string]any {
 			"active_bytes": s.logBytes, "max_file_bytes": s.opts.LogMaxBytes,
 			"backups": s.opts.LogBackups, "written_records": s.logRecords,
 			"write_errors": s.logErrors, "last_error": s.lastLogError,
-			"format":            "redacted completed snapshots in rotating JSONL",
+			"format":            "original completed snapshots in rotating JSONL",
 			"restores_on_start": false, "clear_deletes_logs": false,
 		},
 	}
@@ -397,12 +391,12 @@ func (s *Store) appendLog(flow model.Flow) {
 	}
 	data, err := json.Marshal(PublicFlow(flow, MaxPublicBodyBytes))
 	if err != nil {
-		s.recordLogError(errors.New("serialize redacted capture journal record failed"))
+		s.recordLogError(errors.New("serialize original capture journal record failed"))
 		return
 	}
 	data = append(data, '\n')
 	if int64(len(data)) > s.opts.LogMaxBytes {
-		s.recordLogError(errors.New("redacted capture record exceeds maximum journal file size; record skipped"))
+		s.recordLogError(errors.New("original capture record exceeds maximum journal file size; record skipped"))
 		return
 	}
 	if s.log == nil {

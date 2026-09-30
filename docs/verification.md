@@ -1,5 +1,13 @@
 # 验证记录
 
+## v0.4.3 真实值输出
+
+- UI、API、MCP、HAR、规则和可选 JSONL 统一返回真实值，Authorization、Cookie、URL 参数、JSON／表单、HTML、纯文本与错误均不脱敏。
+- MCP 回归验证两个不同 Authorization 原值均可读取、比较；正文在 8192 字节预览之外变化也能被检出。截断、未完成及加密 CONNECT 内容不会标记为完整比较。
+- 二进制输出以 Base64 无损表示，UTF-8 预览边界不拆分字符；正文保留采集、解码和展示截断标记。
+- 本地 go test、go vet、actionlint 通过。0.4.3 安装包构建成功，1100×740 原生桌面 15 项自检和实际 CLI stdio／代理冒烟通过。
+- 旧版本验证记录保留如下；旧版脱敏描述不适用于 0.4.3。
+
 ## v0.4.2 登录与 HTTPS 兼容性
 
 - 应用默认仅解密 capture.hosts；未设置主机或不匹配目标时保持原始 TLS，通过相同上游联网。exclude_hosts 优先，方法／路径筛选不阻断 CONNECT。

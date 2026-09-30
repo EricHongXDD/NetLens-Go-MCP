@@ -38,7 +38,7 @@ func (w *window) exportHAR() {
 	if !w.requireService() {
 		return
 	}
-	dlg := walk.FileDialog{Title: "导出脱敏 HAR", Filter: "HAR 文件 (*.har)|*.har", FilePath: "netlens-" + time.Now().Format("20060102-150405") + ".har"}
+	dlg := walk.FileDialog{Title: "导出 HAR", Filter: "HAR 文件 (*.har)|*.har", FilePath: "netlens-" + time.Now().Format("20060102-150405") + ".har"}
 	accepted, err := dlg.ShowSave(w.mw)
 	if err != nil {
 		w.fail(err)
@@ -54,7 +54,7 @@ func (w *window) exportHAR() {
 		w.fail(err)
 		return
 	}
-	w.notice.SetText("已导出当前筛选下最近最多 100 条脱敏记录。")
+	w.notice.SetText("已导出当前筛选下最近最多 100 条真实记录。")
 }
 
 func (w *window) saveHAR(path string) error {
@@ -101,7 +101,7 @@ func (w *window) exportBody() {
 	if w.tabs.CurrentIndex() == 1 {
 		body, side = flow.RequestBody, "request"
 	}
-	dlg := walk.FileDialog{Title: "导出完整原始正文（未脱敏）", Filter: "正文文件 (*.body)|*.body|所有文件 (*.*)|*.*", FilePath: "netlens-" + side + "-" + flow.ID + ".body"}
+	dlg := walk.FileDialog{Title: "导出完整原始正文", Filter: "正文文件 (*.body)|*.body|所有文件 (*.*)|*.*", FilePath: "netlens-" + side + "-" + flow.ID + ".body"}
 	accepted, err := dlg.ShowSave(w.mw)
 	if err != nil {
 		w.fail(err)
@@ -115,7 +115,7 @@ func (w *window) exportBody() {
 		w.fail(err)
 		return
 	}
-	w.notice.SetText(fmt.Sprintf("已导出 %s 正文 %d 字节（未脱敏）", side, len(body.Data)))
+	w.notice.SetText(fmt.Sprintf("已导出 %s 原始正文 %d 字节", side, len(body.Data)))
 	if body.Truncated || body.Size > int64(len(body.Data)) {
 		w.notice.SetText("已导出保留的原始字节；采集已截断，缺失部分无法恢复。")
 	}
@@ -143,7 +143,7 @@ func (w *window) compare() {
 		w.fail(err)
 		return
 	}
-	w.showText("请求对比 · 脱敏可见字段", pretty(value))
+	w.showText("请求对比 · 原始值", pretty(value))
 }
 
 func (w *window) replaySelected() {
@@ -242,7 +242,7 @@ func (w *window) manageRules() {
 		AssignTo: &dialog, Title: "规则管理", Background: brush(panel), Size: d.Size{Width: 900, Height: 750}, MinSize: d.Size{Width: 750, Height: 600},
 		CancelButton: &cancel, Layout: d.VBox{}, Font: d.Font{Family: "Microsoft YaHei UI", PointSize: 10},
 		Children: []d.Widget{
-			d.Label{Text: "当前规则（脱敏预览）"},
+			d.Label{Text: "当前规则（原始值）"},
 			d.TextEdit{Text: pretty(w.runtime.Service.PublicRules()), ReadOnly: true, VScroll: true, MaxLength: 2 << 20},
 			d.Label{Text: "新的完整规则数组：应用后替换全部规则；[] 表示移除全部规则。每条规则必须限定目标主机。"},
 			d.TextEdit{AssignTo: &editor, Text: "[]", VScroll: true, MaxLength: 2 << 20, Font: d.Font{Family: "Consolas", PointSize: 10}},

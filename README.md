@@ -1,8 +1,8 @@
 # NetLens：可由大模型操作的 Go HTTP(S) 抓包工具
 
-NetLens 是一个 Go 实现的本地调试代理：应用把 HTTP(S) 请求发给代理后，人可以在 Windows 原生桌面窗口查看流量，大模型可以通过 MCP 配置采集范围、查找异常请求、读取脱敏详情、比较请求、导出 HAR，并在明确开启相关能力后执行请求重放、Header 修改、延迟注入和 Mock。
+NetLens 是一个 Go 实现的本地调试代理：应用把 HTTP(S) 请求发给代理后，人可以在 Windows 原生桌面窗口查看流量，大模型可以通过 MCP 配置采集范围、查找异常请求、读取真实详情、比较请求、导出 HAR，并在明确开启相关能力后执行请求重放、Header 修改、延迟注入和 Mock。
 
-当前交付是 **v0.4.2 原生 Windows 桌面软件**。重点是 Fiddler 一类的 HTTP 应用层排查流程。Wireshark 的网卡抓包、PCAP 分析、TCP 重传分析等能力列入后续扩展，当前没有实现。程序不内置大模型或 API Key；由你选用的 MCP 客户端连接模型，模型再调用 NetLens。
+当前交付是 **v0.4.3 原生 Windows 桌面软件**。重点是 Fiddler 一类的 HTTP 应用层排查流程。Wireshark 的网卡抓包、PCAP 分析、TCP 重传分析等能力列入后续扩展，当前没有实现。程序不内置大模型或 API Key；由你选用的 MCP 客户端连接模型，模型再调用 NetLens。
 
 **Windows 用户**：可使用自动构建的 `NetLens-版本-windows-amd64-setup.exe` 安装包，安装后从开始菜单打开 NetLens，直接打开中文原生窗口，不使用浏览器或 WebView。安装、MCP 配置和 GitHub 自动发布说明见 [Windows 使用指南](docs/windows.md)。GitHub Actions 在每次推送时生成安装包，推送 `vMAJOR.MINOR.PATCH` 标签时自动发布到 Releases。
 
@@ -19,9 +19,9 @@ NetLens 是一个 Go 实现的本地调试代理：应用把 HTTP(S) 请求发�
 | 大模型入口 | 官方 MCP Go SDK；stdio 和 Streamable HTTP 两种传输 |
 | 人工入口 | 圆角深色原生桌面窗口，侧栏无全局滚动，与 MCP、HTTP API 共用采集引擎 |
 | Clash / VPN 串联 | 桌面上游默认 `127.0.0.1:7890`，HTTP、HTTPS 解密和 CONNECT 继续经过 Clash，保留其规则与节点 |
-| 排查操作 | 统计、慢请求、双请求对比、脱敏 HAR 导出 |
+| 排查操作 | 统计、慢请求、双请求对比、真实值 HAR 导出 |
 | 主动调试 | 按启动权限开放同源重放、请求 Header 修改、延迟和 Mock |
-| 数据保留 | 有界内存；可选轮转脱敏 JSONL；默认不把原始流量写磁盘 |
+| 数据保留 | 有界内存；可选轮转原始值 JSONL；默认不把原始流量写磁盘 |
 
 源码依赖 **Go 1.26 或更高版本**，固定使用 `github.com/modelcontextprotocol/go-sdk v1.8.0`。SDK 来自 [MCP 官方 Go 仓库](https://github.com/modelcontextprotocol/go-sdk)。代理核心使用 Go 标准库，不需要 libpcap，也不需要管理员权限。
 
@@ -38,7 +38,7 @@ NetLens 是一个 Go 实现的本地调试代理：应用把 HTTP(S) 请求发�
 ./bin/NetLens.exe
 ```
 
-停止服务后可在窗口勾选 HTTPS 解密、规则、重放或脱敏日志，再启动服务。MCP 客户端连接桌面实例时，点击窗口的 **复制 MCP 配置** 获取 HTTP 配置；stdio 使用安装目录中的 `netlens-cli.exe`。两种实例使用相同端口时应只启动一个。
+停止服务后可在窗口勾选 HTTPS 解密、规则、重放或原始日志，再启动服务。MCP 客户端连接桌面实例时，点击窗口的 **复制 MCP 配置** 获取 HTTP 配置；stdio 使用安装目录中的 `netlens-cli.exe`。两种实例使用相同端口时应只启动一个。
 
 ## 2. 五分钟本地跑通
 
@@ -69,7 +69,7 @@ go run ./examples/demo-server
 | 路径 | 用途 |
 |---|---|
 | `/health` | 返回正常 JSON 响应 |
-| `/echo` | 返回请求方法、Header、参数与 JSON 正文，适合查看脱敏和 Header 修改 |
+| `/echo` | 返回请求方法、Header、参数与 JSON 正文，适合查看原始值和 Header 修改 |
 | `/error` | 返回预设 503；可用 `?status=429` 等参数改变状态码 |
 | `/slow?ms=800` | 注入 800 ms 服务端等待，参数范围为 0–10000 |
 | `/stream` | 每 250 ms 发送一个 SSE 事件，共 5 个 |
@@ -122,7 +122,7 @@ curl --noproxy "" --proxy http://127.0.0.1:8080 \
 
 本地地址经常出现在 `NO_PROXY` 中，因此示例使用 `--noproxy ""`，确保这几条测试请求经过 NetLens。应用只要实际使用了代理，流量就会自动采集，无需逐条手工触发采集命令。
 
-Windows 桌面实例中可查到正常请求、503 和慢请求；敏感字段应显示 `[REDACTED]`。SSE 内容继续按流转发给 curl，但目前公开正文视图不解析 `text/event-stream`，因此正文可能显示为隐藏。活动流的正文和最终耗时可能要到完成后才更新。
+Windows 桌面实例中可查到正常请求、503 和慢请求；Authorization、Cookie 和正文应显示真实值。SSE 内容继续按流转发给 curl，保留的文本正文可以读取。活动流的正文和最终耗时可能要到完成后才更新。
 
 ### 2.5 用 HTTP API 做简单自检
 
@@ -261,22 +261,22 @@ MCP 初始化、协议版本协商、工具目录、参数 schema 和工具返�
 |---|---|---|
 | `capture_status` | 查看状态、地址、TLS 模式、保留策略、最近控制动作 | `{}` |
 | `capture_configure` | 启停记录、替换采集过滤器 | `enabled` 和／或 `filter`；`filter:{}` 清除过滤条件 |
-| `flows_list` | 查询脱敏摘要，按最新顺序分页 | 筛选字段位于参数顶层；默认 `limit=50`，最大 200 |
-| `flows_get` | 获取一条脱敏请求、响应和时间证据 | `id`；默认 `body_limit=8192`，最大 65536 |
-| `flows_body` | 分页读取未脱敏完整正文，支持 HTML、纯文本、错标 JSON 与 gzip/deflate | `id`、`side`（默认 response）、`offset`、`limit`（默认 16384，最大 32768）；跟随 `next_offset` 直到 `has_more=false` |
+| `flows_list` | 查询真实值摘要，按最新顺序分页 | 筛选字段位于参数顶层；默认 `limit=50`，最大 200 |
+| `flows_get` | 获取一条真实值请求、响应和时间证据 | `id`；默认 `body_limit=8192`，最大 65536 |
+| `flows_body` | 分页读取原始完整正文，支持 HTML、纯文本、错标 JSON 与 gzip/deflate | `id`、`side`（默认 response）、`offset`、`limit`（默认 16384，最大 32768）；跟随 `next_offset` 直到 `has_more=false` |
 | `flows_stats` | 计算当前保留样本的状态分布、错误和延迟分位数 | 筛选字段位于参数顶层；慢请求用 `flows_list.min_duration_ms` 查 |
-| `flows_compare` | 比较两条请求的可见字段与耗时差异 | `left_id`、`right_id`；每个正文最多比较 8192 字节的脱敏视图 |
-| `flows_export_har` | 返回脱敏 HAR 对象 | `filter`、`limit`、`body_limit`；默认 20 条／每正文 2048 字节，最大 100 条 |
+| `flows_compare` | 比较两条请求的原始 Header、正文与耗时差异 | `left_id`、`right_id`；比较全部已采集正文，差异展示最多 8192 字节预览；complete 标明能否完整比较 |
+| `flows_export_har` | 返回真实值 HAR 对象 | `filter`、`limit`、`body_limit`；默认 20 条／每正文 2048 字节，最大 100 条 |
 | `flows_clear` | 清空内存采集缓冲区 | `confirm:true`；磁盘 JSONL 保留 |
-| `rules_list` | 查看当前规则的脱敏配置 | `{}` |
+| `rules_list` | 查看当前规则的真实配置 | `{}` |
 | `rules_replace` | 原子替换全部规则 | 需 `--allow-rules`；`rules:[]` 移除全部规则；最多 32 条 |
 | `requests_replay` | 从保留的请求发起一次真实的同源重放 | 需 `--allow-replay` 和 `confirm:true`；输入完整性检查仍会执行 |
 
-HTTP 200 只说明 HTTP 层成功，业务是否成功需读取正文中的错误码和消息。`flows_get` 会严格识别错标为 `text/html`／`text/plain` 的完整 JSON 对象或数组，并沿用脱敏流程。真正的 HTML、纯文本、JSON 标量和不完整内容可用 `flows_body` 原样读取；每页返回正文与 `redaction:none`、`capture_truncated`、`next_offset`、`has_more`。UTF-8 文本不拆分字符，二进制以 Base64 无损分页；gzip/deflate 自动解压，解压展示最多 8 MiB，超出时可通过桌面导出原始压缩字节。已截断、淘汰或仅有加密 CONNECT 隧道的记录不能恢复缺失正文，需要重新采集。默认每正文采集上限从 64 KiB 提高为 1 MiB，内存总预算仍为 64 MiB。
+HTTP 200 只说明 HTTP 层成功，业务是否成功需读取正文中的错误码和消息。`flows_get` 会严格识别错标为 `text/html`／`text/plain` 的完整 JSON 对象或数组，仅标记格式差异，保留原文。真正的 HTML、纯文本、JSON 标量和不完整内容也会展示，完整内容可用 `flows_body` 原样读取；每页返回正文与 `redaction:none`、`capture_truncated`、`next_offset`、`has_more`。UTF-8 文本不拆分字符，二进制以 Base64 无损分页；gzip/deflate 自动解压，解压展示最多 8 MiB，超出时可通过桌面导出原始压缩字节。已截断、淘汰或仅有加密 CONNECT 隧道的记录不能恢复缺失正文，需要重新采集。默认每正文采集上限从 64 KiB 提高为 1 MiB，内存总预算仍为 64 MiB。
 
 一次工具结果最多 256 KiB。超出时需要减小 `limit`、`body_limit`，先查摘要再逐条读取详情。`flows_get` 的 `body_limit` 只改变已经采集数据的展示量，不能恢复采集时被截断的正文。
 
-修改工具返回小回执：`rules_replace` 返回是否更新、规则数量／ID 和 `detail_tool:rules_list`；重放成功返回新请求 ID、关联 ID、状态、时间、字节数及 `detail_tool:flows_get`，正文和 Header 另行读取。重放失败也提供经过脱敏的错误分类及可用的 flow ID。`retained:false` 表示该请求没有保留在内存，例如采集暂停或过滤条件未命中，因此无法随后通过 `flows_get` 读取。查询详情失败不能作为再次发送变更请求的理由。
+修改工具返回小回执：`rules_replace` 返回是否更新、规则数量／ID 和 `detail_tool:rules_list`；重放成功返回新请求 ID、关联 ID、状态、时间、字节数及 `detail_tool:flows_get`，正文和 Header 另行读取。重放失败也提供原始错误信息及可用的 flow ID。`retained:false` 表示该请求没有保留在内存，例如采集暂停或过滤条件未命中，因此无法随后通过 `flows_get` 读取。查询详情失败不能作为再次发送变更请求的理由。
 
 ### 5.1 有效工具调用示例：设置采集
 
@@ -360,7 +360,7 @@ HTTP 200 只说明 HTTP 层成功，业务是否成功需读取正文中的错�
 }
 ```
 
-每条规则必须有明确的 `match.hosts`。规则按数组顺序执行，命中的 Header 修改和延迟可以累加；遇到第一个 Mock 后返回该响应，不再请求上游。单条延迟最多 5000 ms，Mock 正文最多 64 KiB。Mock 也需要正确的 Content-Type，才能在脱敏视图中显示 JSON 正文。
+每条规则必须有明确的 `match.hosts`。规则按数组顺序执行，命中的 Header 修改和延迟可以累加；遇到第一个 Mock 后返回该响应，不再请求上游。单条延迟最多 5000 ms，Mock 正文最多 64 KiB。Mock 建议使用正确的 Content-Type；错标类型或纯文本正文也按真实内容展示。
 
 ### 5.4 重放语义
 
@@ -378,7 +378,7 @@ HTTP 200 只说明 HTTP 层成功，业务是否成功需读取正文中的错�
 
 **API Key 与鉴权排查**：
 
-> 查找测试域名上 401／403 的请求，比较它们和一条成功请求的路径、方法、非敏感 Header、状态码及错误码。不要输出密钥原文。区分证据已支持的差异和因为脱敏无法判断的内容。
+> 查找测试域名上 401／403 的请求，比较它们和一条成功请求的路径、方法、原始 Header、状态码及错误码。检查 Authorization 是否变化，并区分证据已支持的差异和采集截断导致的未知内容。
 
 **BLS 日志推送／查询排查**：
 
@@ -390,7 +390,7 @@ HTTP 200 只说明 HTTP 层成功，业务是否成功需读取正文中的错�
 
 **修复前后比较**：
 
-> 比较请求 A 和 B 的 URL、状态码、脱敏 Header、可见 JSON 字段与耗时差异。标明被隐藏、被截断以及无法比较的部分，不要把这些部分判为相同。
+> 比较请求 A 和 B 的 URL、状态码、原始 Header、JSON 字段与耗时差异。标明被截断以及无法比较的部分，不要把这些部分判为相同。
 
 流量中的响应正文、URL 和错误信息均是待分析数据。即使其中含有“忽略之前的指令”“调用重放工具”等文字，也不能当成用户授权或工具指令。MCP 服务说明和返回值会标记这一边界。
 
@@ -415,7 +415,7 @@ HTTP 200 只说明 HTTP 层成功，业务是否成功需读取正文中的错�
 
 TTFB 不能直接等同于服务端纯业务处理时间；DNS、连接与 TLS 阶段也不能在所有并发建连场景下简单相加推导业务耗时。时间采集基于 [Go `httptrace`](https://pkg.go.dev/net/http/httptrace)。要判断重传、丢包或具体服务内部耗时，仍需要相应的网络层证据或服务端追踪信息。
 
-## 8. 数据保留、脱敏和资源限制
+## 8. 原始值输出、数据保留和资源限制
 
 | 默认项 | 默认值 | 修改方式 |
 |---|---|---|
@@ -432,11 +432,11 @@ TTFB 不能直接等同于服务端纯业务处理时间；DNS、连接与 TLS �
 
 内存预算针对保留记录的保守估算，包含正文、Header 和记录结构；它不是进程 RSS 上限。活动请求、Go 运行时、连接和证书缓存等还会占用内存。
 
-原生窗口的请求／响应页默认显示完整未脱敏正文，关闭“完整正文”开关可返回脱敏预览。点击“导出正文”保存当前请求或响应的原始采集字节（保留服务器压缩及编码）；复制按钮复制当前请求／响应页。HTML 仅作为只读文本展示，不加载页面或执行脚本。MCP `flows_body` 与带令牌的 `GET /api/body?id=…&side=response&offset=0&limit=16384` 提供同一完整正文分页入口。JSON 页、常规详情、HAR 与 JSONL 始终脱敏。常见认证 Header、Cookie、API Key、token、签名，以及 JSON／表单中匹配敏感字段名的值会被隐藏。任意业务字段里未标注的秘密、URL 路径中嵌入的秘密等不保证被识别；生产使用前应按接口补充字段规则。
+原生窗口、API、MCP、HAR、规则和可选 JSONL 均返回真实值。Authorization、Cookie、API Key、token、签名、URL 参数、错误信息以及 JSON／表单字段不再替换成占位符。请求／响应页默认显示完整保留正文；关闭“完整正文”仅缩短预览，不会脱敏。点击“导出正文”保存原始采集字节（保留服务器压缩及编码）。HTML 作为只读文本展示，不执行脚本。
 
-正文只对**完整的 JSON 对象／数组和 URL 编码表单**提供结构化脱敏展示。未支持类型、二进制、缺失 Content-Type、无效／截断 JSON、采集不完整的正文被隐藏。代理关闭了 Go Transport 自动解压，带 gzip 等非 identity Content-Encoding 的正文在公开视图中隐藏，转发时保持其编码。`capture_truncated` 表示采集阶段不完整，`display_truncated` 表示完整数据脱敏后只展示了一部分。
+普通详情和 HAR 使用有长度上限的原文预览；`display_truncated` 标记展示截断，`capture_truncated` 标记采集截断。`flows_body` 与认证后的 `GET /api/body?id=…&side=response&offset=0&limit=16384` 分页读取全部保留正文。gzip／deflate 自动解压展示，解码最多 8 MiB；无法解码的内容和二进制以 Base64 无损输出。桌面导出正文始终保存原始采集字节。
 
-对于声明为 `text/html` 或 `text/plain`、但正文能严格解析为完整 JSON 对象／数组的接口，公开视图按 JSON 脱敏展示，并用 `content_type_mismatch:true` 和 `declared_content_type` 标记格式不一致。此处理只影响展示，不修改实际转发的 Header 或正文；普通 HTML、任意文本及 JSON 标量仍隐藏。
+错标为 `text/html` 或 `text/plain` 的完整 JSON 对象／数组会标记 `content_type_mismatch:true`，正文仍保留原始字符与格式。真正的 HTML、文本、JSON 标量、不完整 JSON 和缺失 Content-Type 的内容也会展示。`flows_compare` 比较真实 Header 和全部已采集正文，避免预览范围之外的变化被漏报；`body_comparison.complete:false` 表示缺失字节仍未知。
 
 启用持久化示例：
 
@@ -449,7 +449,7 @@ TTFB 不能直接等同于服务端纯业务处理时间；DNS、连接与 TLS �
   --timeout 120s
 ```
 
-完成的脱敏记录写入 `.netlens/captures/flows.jsonl`，轮转文件为 `flows.1.jsonl` 等。重启不会从 JSONL 恢复内存索引；历史 JSONL 也不能用于恢复原始凭据重放。`flows_clear` 只清空内存，不删除已有日志，正在处理的流量之后仍可能完成并写入。
+完成的真实值记录写入 `.netlens/captures/flows.jsonl`，轮转文件为 `flows.1.jsonl` 等。重启不会从 JSONL 恢复内存索引；历史 JSONL 也不会自动恢复为可重放的内存记录。`flows_clear` 只清空内存，不删除已有日志，正在处理的流量之后仍可能完成并写入。
 
 状态中的 `recent_actions` 仅在内存保存最近 30 次部分控制操作，属于诊断辅助信息，不是持久化审计日志。证书私钥、控制令牌和运行数据目录不应作为项目源码提交。
 
@@ -468,9 +468,9 @@ TTFB 不能直接等同于服务端纯业务处理时间；DNS、连接与 TLS �
 | `PUT /api/rules` | 替换规则，正文为 `{"rules":[...]}` |
 | `POST /api/replay` | 重放，参数与 `requests_replay` 一致 |
 | `POST /api/clear` | 清空内存，正文为 `{"confirm":true}` |
-| `GET /api/export/har?limit=20` | 下载脱敏 HAR；单次最多 100 条 |
+| `GET /api/export/har?limit=20` | 下载真实值 HAR；单次最多 100 条 |
 
-API 使用同一组业务校验，因此不会绕过 MCP 工具的启动权限、同源限制或脱敏策略。HAR 导出是便于互查的可见证据格式；被隐藏或截断的正文仍保持其限制。
+API 使用同一组业务校验，因此不会绕过 MCP 工具的启动权限、同源限制或输出预算。HAR 导出是便于互查的可见证据格式；截断或尚未采集到的正文无法凭空补全。
 
 ## 10. 常见问题
 
@@ -516,7 +516,7 @@ python3 scripts/smoke.py ./bin/netlens
 
 初版已在 Linux amd64、Go 1.26.8 上通过 `go vet`、全包 `go test -race` 和真实二进制 stdio 冒烟测试。本次 Windows amd64、Go 1.27.0 验证通过全包测试、`go vet`、真实二进制 MCP/代理冒烟测试和 Inno Setup 安装包编译。详细覆盖及未验证项见 [docs/verification.md](docs/verification.md)。`-race` 需要受支持的目标平台及可用的 C 工具链；冒烟脚本只需 Python 3 标准库。
 
-手工验收建议覆盖：本地 HTTP 透传、JSON 脱敏、503 和慢请求定位、SSE 分段转发、HTTPS 信任两段链路、MCP 工具发现、规则权限与 Mock、同源重放、跨源拒绝、内存淘汰和 JSONL 轮转。
+手工验收建议覆盖：本地 HTTP 透传、真实 Authorization／Cookie／正文输出、503 和慢请求定位、SSE 分段转发、HTTPS 信任两段链路、MCP 工具发现、规则权限与 Mock、同源重放、跨源拒绝、内存淘汰和 JSONL 轮转。
 
 ## 13. 目录与官方参考
 
@@ -524,7 +524,7 @@ python3 scripts/smoke.py ./bin/netlens
 |---|---|
 | `cmd/netlens` | CLI 入口与启动参数 |
 | `internal/proxy` | 显式代理、CONNECT、HTTPS MITM、证书、转发和重放 |
-| `internal/capture` | 过滤、有界存储、脱敏、统计和 HAR |
+| `internal/capture` | 过滤、有界存储、原始值输出、统计和 HAR |
 | `internal/model` | 请求、规则、过滤器和时间数据结构 |
 | `internal/mcpserver` | 官方 SDK 接入和 MCP 工具包装 |
 | `internal/app` | 业务服务、HTTP 控制端点和内嵌 UI |

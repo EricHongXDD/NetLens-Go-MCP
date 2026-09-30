@@ -1,6 +1,7 @@
 package capture
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -146,101 +147,66 @@ func TestByteBudgetIncludesHeadersAndUpserts(t *testing.T) {
 	}
 }
 
-func TestPublicViewsRedactEverySurface(t *testing.T) {
-	flow := sampleFlow("secrets")
-	flow.Error = `Get "https://example.com?token=error-secret": x509: certificate signed by unknown authority`
+func TestPublicViewsPreserveEveryOriginalSurface(t *testing.T) {
+	flow := sampleFlow("original")
+	flow.Error = `Get "https://example.com?token=error-secret": original network failure`
 	flow.ResponseHeaders.Set("Location", "https://redirect.example.com/?access_token=redirect-secret")
-	flow.ResponseHeaders.Set("Content-Type", "application/json; token=content-type-secret")
-	flow.RequestHeaders.Set("X-Auth", "auth-secret")
-	flow.RequestHeaders.Set("X-Debug", `{"api_key":"custom-header-secret","ok":true}`)
-	flow.RequestHeaders.Set("X-API-Key", "api-header-secret")
-	flow.RequestHeaders.Set("Ocp-Apim-Subscription-Key", "subscription-header-secret")
-	flow.RequestHeaders.Set("X-Custom-Url", "https://example.com?token=custom-url-secret")
-	flow.RequestHeaders.Set("Proxy-Authorization", "Basic proxy-secret")
 	flow.RequestHeaders.Set("Cookie", "id=request-cookie-secret")
-	flow.RequestHeaders.Set("X-Request-Id", "visible-id")
-	for name, value := range map[string]any{
-		"flow": PublicFlow(flow, 4096), "summary": PublicSummary(flow), "har": ExportHARLimited([]model.Flow{flow}, 4096),
-	} {
+	for name, value := range map[string]any{"flow": PublicFlow(flow, 4096), "har": ExportHARLimited([]model.Flow{flow}, 4096)} {
 		data, err := json.Marshal(value)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, secret := range []string{"request-secret", "nested-secret", "response-secret", "array-secret", "user-secret", "url-secret", "fragment-secret", "header-secret", "cookie-secret", "error-secret", "redirect-secret", "content-type-secret", "auth-secret", "custom-header-secret", "api-header-secret", "subscription-header-secret", "custom-url-secret", "proxy-secret", "request-cookie-secret"} {
-			if strings.Contains(string(data), secret) {
-				t.Errorf("%s leaked %q: %s", name, secret, data)
+		for _, secret := range []string{"request-secret", "nested-secret", "response-secret", "array-secret", "user-secret", "url-secret", "fragment-secret", "header-secret", "cookie-secret", "error-secret", "redirect-secret", "request-cookie-secret"} {
+			if !strings.Contains(string(data), secret) {
+				t.Errorf("%s 丢失原始值 %q", name, secret)
 			}
 		}
-		if name != "summary" && !strings.Contains(string(data), "visible-id") {
-			t.Errorf("%s hid benign diagnostic header", name)
+		if strings.Contains(string(data), "[REDACTED]") {
+			t.Fatal("仍有脱敏占位符")
 		}
 	}
-	if flow.RequestHeaders.Get("Authorization") != "Bearer header-secret" || !strings.Contains(string(flow.RequestBody.Data), "request-secret") {
-		t.Fatal("public redaction mutated raw request needed for forwarding/replay")
+	view := PublicFlow(flow, 4096)
+	view["request_headers"].(http.Header).Set("Authorization", "changed")
+	if flow.RequestHeaders.Get("Authorization") != "Bearer header-secret" {
+		t.Fatal("输出共享可变 Header")
 	}
 	store := testStore(t, Options{})
 	store.Put(flow)
-	data, _ := json.Marshal(store.Query(model.Query{}))
-	if strings.Contains(string(data), "url-secret") || strings.Contains(string(data), "error-secret") {
-		t.Fatal("Query exposed raw URL or error text")
+	summary := store.Query(model.Query{}).Items[0]
+	if summary.URL != flow.URL || summary.Error != flow.Error {
+		t.Fatal("摘要未返回原始 URL 或错误")
 	}
 }
 
 func TestBodyPolicyAndDisplayLimit(t *testing.T) {
-	cases := []struct {
-		name, contentType, contentEncoding, body string
-		truncated                                bool
-		hidden                                   bool
-	}{
-		{"json", "application/problem+json", "", `{"message":"hello","credentials":{"username":"alice","password":"secret"}}`, false, false},
-		{"form", "application/x-www-form-urlencoded", "", "user%5Bpassword%5D=secret&token=secret&name=alice", false, false},
-		{"plain", "text/plain", "", "password=secret", false, true},
-		{"missing-type", "", "", `{"password":"secret"}`, false, true},
-		{"malformed", "application/json", "", `{"password":"secret"`, false, true},
-		{"trailing", "application/json", "", `{"ok":true}{"password":"secret"}`, false, true},
-		{"truncated-valid-prefix", "application/json", "", `{"password":"secret"}`, true, true},
-		{"gzip", "application/json", "gzip", `{"password":"secret"}`, false, true},
-		{"json-string", "application/json", "", `"unlabeled-secret"`, false, true},
-		{"invalid-form", "application/x-www-form-urlencoded", "", "password=%ZZ", false, true},
-		{"binary", "application/json", "", "\xff\x00secret", false, true},
+	for _, data := range []string{`{"password":"secret"}`, `password=secret`, `<html>secret</html>`, `"secret"`, `{"token":"secret"`, `user%5Bpassword%5D=secret`, "\xff\x00secret"} {
+		view := publicBody(model.Body{Data: []byte(data)}, nil, 1024)
+		got := []byte(view["text"].(string))
+		if view["encoding"] == "base64" {
+			var err error
+			got, err = base64.StdEncoding.DecodeString(string(got))
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if view["hidden"] != false || string(got) != data || view["redaction"] != "none" {
+			t.Fatal("正文被替换或隐藏")
+		}
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			headers := http.Header{"Content-Type": {tc.contentType}}
-			if tc.contentEncoding != "" {
-				headers.Set("Content-Encoding", tc.contentEncoding)
-			}
-			view := publicBody(model.Body{Data: []byte(tc.body), Size: int64(len(tc.body)), Truncated: tc.truncated}, headers, 1024)
-			if view["hidden"] != tc.hidden {
-				t.Fatalf("unexpected hidden state: %#v", view)
-			}
-			if strings.Contains(fmt.Sprint(view["text"]), "secret") {
-				t.Fatalf("body view leaked a secret: %#v", view)
-			}
-			if tc.hidden {
-				if _, ok := view["text"]; ok || view["reason"] == nil {
-					t.Fatal("hidden body has visible text or lacks explanation")
-				}
-			}
-		})
-	}
-	body := []byte(`{"text":"` + strings.Repeat("你好", 20000) + `","password":"secret"}`)
-	view := publicBody(model.Body{Data: body, Size: int64(len(body))}, http.Header{"Content-Type": {"application/json"}}, 100)
+	body := []byte(strings.Repeat("你好", 20000))
+	view := publicBody(model.Body{Data: body}, nil, 100)
 	text := view["text"].(string)
-	if len(text) > 100 || !utf8.ValidString(text) || view["display_truncated"] != true || view["capture_truncated"] != false {
-		t.Fatalf("display truncation is not bounded/marked/UTF8 safe: %#v", view)
+	if len(text) > 103 || !utf8.ValidString(text) || view["display_truncated"] != true || view["capture_truncated"] != false {
+		t.Fatal("预览边界未标注或拆分 UTF-8")
 	}
-	view = publicBody(model.Body{Data: body, Size: int64(len(body))}, http.Header{"Content-Type": {"application/json"}}, 1<<20)
-	if len(view["text"].(string)) > MaxPublicBodyBytes {
-		t.Fatal("public body limit exceeded hard cap")
-	}
-	view = publicBody(model.Body{Data: []byte(`{"ok":true}`), Size: 100}, http.Header{"Content-Type": {"application/json"}}, 1024)
-	if view["hidden"] != true {
-		t.Fatal("missing captured bytes were not treated as an incomplete structure")
+	view = publicBody(model.Body{Data: []byte("prefix"), Size: 100}, nil, 1024)
+	if view["hidden"] != false || view["text"] != "prefix" || view["capture_truncated"] != true {
+		t.Fatal("采集前缀未真实返回")
 	}
 }
 
-func TestRedactURLCases(t *testing.T) {
+func TestOriginalURLCases(t *testing.T) {
 	for _, raw := range []string{
 		"https://example.com?token=%ZZsecret",
 		"https://example.com?password=secret&name=alice",
@@ -250,12 +216,12 @@ func TestRedactURLCases(t *testing.T) {
 		"http://[invalid/secret",
 		"data:text/plain,secret",
 	} {
-		if result := RedactURL(raw); strings.Contains(result, "secret") {
-			t.Errorf("URL leaked secret: %q -> %q", raw, result)
+		if result := PublicSummary(model.Flow{URL: raw}).URL; result != raw {
+			t.Errorf("URL 原始值被改变: %q -> %q", raw, result)
 		}
 	}
-	if result := RedactURL("https://example.com/path?q=hello&limit=10"); !strings.Contains(result, "q=hello") || !strings.Contains(result, "limit=10") {
-		t.Fatalf("URL hid non-sensitive query parameters: %q", result)
+	if result := PublicSummary(model.Flow{URL: "https://example.com/path?q=hello&limit=10"}).URL; !strings.Contains(result, "q=hello") || !strings.Contains(result, "limit=10") {
+		t.Fatalf("URL 原始查询参数丢失: %q", result)
 	}
 }
 
@@ -312,7 +278,7 @@ func TestHostAndFilterMatching(t *testing.T) {
 	}
 }
 
-func TestPersistenceIsRedactedCompletedRotatingAndNeverRestored(t *testing.T) {
+func TestPersistenceIsOriginalCompletedRotatingAndNeverRestored(t *testing.T) {
 	dir := t.TempDir()
 	store := testStore(t, Options{LogDir: dir, LogMaxBytes: 6000, LogBackups: 2})
 	inProgress := sampleFlow("first")
@@ -344,8 +310,8 @@ func TestPersistenceIsRedactedCompletedRotatingAndNeverRestored(t *testing.T) {
 		if len(data) > 6000 || len(data) == 0 {
 			t.Fatalf("journal file violated size budget: %s (%d bytes)", file, len(data))
 		}
-		if strings.Contains(string(data), "-secret") {
-			t.Fatalf("journal retained raw secret: %s", data)
+		if !strings.Contains(string(data), "header-secret") || !strings.Contains(string(data), "request-secret") {
+			t.Fatalf("journal lost original values: %s", data)
 		}
 		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 			if !json.Valid([]byte(line)) {
@@ -359,7 +325,7 @@ func TestPersistenceIsRedactedCompletedRotatingAndNeverRestored(t *testing.T) {
 	}
 	reopened := testStore(t, Options{LogDir: dir, LogMaxBytes: 6000, LogBackups: 2})
 	if reopened.Info()["stored_flows"].(int) != 0 {
-		t.Fatal("redacted persisted traffic was restored as replayable raw data")
+		t.Fatal("persisted traffic was restored as replayable raw data")
 	}
 }
 

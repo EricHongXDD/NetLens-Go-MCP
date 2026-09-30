@@ -300,7 +300,7 @@ func (w *window) selectFlow() {
 	index := w.table.CurrentIndex()
 	if index < 0 || index >= len(w.model.items) {
 		w.selectedID, w.detail = "", nil
-		w.overview.SetText("选择上方流量，查看脱敏请求、响应和时间信息。\r\n\r\n暂无流量时，请检查待调试应用的代理配置。")
+		w.overview.SetText("选择上方流量，查看真实请求、响应和时间信息。\r\n\r\n暂无流量时，请检查待调试应用的代理配置。")
 		w.request.SetText("")
 		w.response.SetText("")
 		w.json.SetText("")
@@ -329,8 +329,8 @@ func (w *window) selectFlow() {
 	w.response.SetText("响应头\r\n" + pretty(flow["response_headers"]) + "\r\n\r\n响应正文\r\n" + pretty(flow["response_body"]))
 	if w.fullBody.Checked() {
 		if raw, ok := w.runtime.Service.Store.Get(w.selectedID); ok && raw.RawAvailable {
-			w.request.SetText("请求头（脱敏）\r\n" + pretty(flow["request_headers"]) + "\r\n\r\n" + capture.InspectBody(raw.RequestBody, raw.RequestHeaders).DisplayText())
-			w.response.SetText("响应头（脱敏）\r\n" + pretty(flow["response_headers"]) + "\r\n\r\n" + capture.InspectBody(raw.ResponseBody, raw.ResponseHeaders).DisplayText())
+			w.request.SetText("请求头\r\n" + pretty(flow["request_headers"]) + "\r\n\r\n" + capture.InspectBody(raw.RequestBody, raw.RequestHeaders).DisplayText())
+			w.response.SetText("响应头\r\n" + pretty(flow["response_headers"]) + "\r\n\r\n" + capture.InspectBody(raw.ResponseBody, raw.ResponseHeaders).DisplayText())
 		}
 	}
 	w.json.SetText(pretty(detail))

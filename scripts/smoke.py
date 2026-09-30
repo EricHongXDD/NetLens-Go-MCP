@@ -125,7 +125,7 @@ def main():
                 assert full["redaction"] == "none" and not full["has_more"]
                 serialized = json.dumps(detail)
                 for secret in ("QUERY-SECRET", "HEADER-SECRET", "RESPONSE-SECRET", "COOKIE-SECRET"):
-                    assert secret not in serialized, secret
+                    assert secret in serialized, secret
                 replayed = tool("requests_replay", {"flow_id": flow_id, "confirm": True})
                 assert replayed["parent_id"] == flow_id and replayed["source"] == "replay"
                 assert Origin.count == 2, Origin.count
@@ -149,7 +149,7 @@ def main():
                 assert cleared["removed"] == 2
                 process.stdin.close()  # Client disconnect must stop both listeners.
                 assert process.wait(timeout=10) == 0
-                print("PASS: real stdio MCP handshake, full body, proxy capture, redaction, replay, shared control state, auth, HAR and graceful EOF shutdown")
+                print("PASS: real stdio MCP handshake, full body, proxy capture, original values, replay, shared control state, auth, HAR and graceful EOF shutdown")
             except Exception:
                 stderr.flush()
                 stderr.seek(0)
