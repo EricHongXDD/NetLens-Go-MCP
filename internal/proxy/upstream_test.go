@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -136,7 +137,7 @@ func TestUpstreamHTTPSCaptureAndTunnel(t *testing.T) {
 			originRoots := x509.NewCertPool()
 			originRoots.AddCert(origin.Certificate())
 			_, upstream, _, upstreamRecorder := startTestProxy(t, Options{}, nil)
-			ca, err := LoadOrCreateCA(t.TempDir())
+			ca, err := LoadOrCreateCA(filepath.Join(t.TempDir(), "ca"))
 			if err != nil {
 				t.Fatal(err)
 			}
