@@ -1,0 +1,135 @@
+name: Test and Windows installer
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # 官方 v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # 官方 v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Check formatting
+        shell: pwsh
+        run: |
+          $files = git ls-files '*.go'
+          $unformatted = & gofmt -l $files
+          if ($LASTEXITCODE -ne 0 -or $unformatted) { throw "Unformatted Go files: $unformatted" }
+      - run: go mod verify
+      - run: go vet ./...
+      - run: go test ./...
+      - name: Race detector
+        if: runner.os == 'Linux'
+        run: go test -race ./...
+      - name: Build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force bin | Out-Null
+          $binary = if ($IsWindows) { 'bin/netlens.exe' } else { 'bin/netlens' }
+          go build -trimpath -o $binary ./cmd/netlens
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
+          python scripts/smoke.py $binary
+          if ($LASTEXITCODE -ne 0) { throw 'Binary smoke test failed.' }
+
+  windows-installer:
+    name: Build and verify Windows installer
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # 官方 v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # 官方 v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $source = Get-Content -LiteralPath internal/model/model.go -Raw -Encoding UTF8
+          if ($source -notmatch 'var Version = "([0-9]+\.[0-9]+\.[0-9]+)"') { throw 'Source version missing.' }
+          $version = $Matches[1]
+          if ($env:REF_TYPE -eq 'tag') {
+            if ($env:REF_NAME -notmatch '^v([0-9]+\.[0-9]+\.[0-9]+)$') { throw 'Release tags must use vMAJOR.MINOR.PATCH.' }
+            $version = $Matches[1]
+          }
+          "value=$version" >> $env:GITHUB_OUTPUT
+      - name: Install verified Inno Setup compiler
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $installer
+          $expected = '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732'
+          if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Inno Setup checksum mismatch.' }
+          $compilerDir = Join-Path $env:RUNNER_TEMP 'Inno Setup'
+          $process = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/NOICONS', "/DIR=`"$compilerDir`"" -Wait -PassThru -WindowStyle Hidden
+          if ($process.ExitCode -ne 0) { throw 'Inno Setup installation failed.' }
+          "NETLENS_ISCC=$compilerDir\ISCC.exe" >> $env:GITHUB_ENV
+      - name: Package
+        shell: pwsh
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.value }}
+        run: ./scripts/package-windows.ps1 -Version $env:BUILD_VERSION -ISCC $env:NETLENS_ISCC
+      - name: Verify installation and Start Menu
+        shell: pwsh
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.value }}
+        run: ./scripts/verify-windows-installer.ps1 -Installer "dist/NetLens-$env:BUILD_VERSION-windows-amd64-setup.exe" -Version $env:BUILD_VERSION
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # 官方 v7
+        with:
+          name: NetLens-windows-amd64
+          path: |
+            dist/*-setup.exe
+            dist/*.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  release:
+    name: Publish release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: windows-installer
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # 官方 v7
+        with:
+          name: NetLens-windows-amd64
+          path: dist
+      - name: Publish installer and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/* --verify-tag --title "NetLens $RELEASE_TAG" --generate-notes
+          fi

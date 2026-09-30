@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "netlens": {
+      "type": "http",
+      "url": "http://127.0.0.1:9090/mcp",
+      "headers": {
+        "Authorization": "Bearer REPLACE_WITH_CONTROL_TOKEN"
+      }
+    }
+  }
+}

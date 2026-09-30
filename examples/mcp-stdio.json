@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "netlens": {
+      "command": "/absolute/path/netlens/bin/netlens",
+      "args": [
+        "mcp",
+        "--mitm",
+        "--data-dir",
+        "/absolute/path/netlens/.netlens"
+      ]
+    }
+  }
+}
