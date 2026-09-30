@@ -2,9 +2,9 @@
 
 ## 1. 目标与当前交付
 
-NetLens 将应用层流量记录与大模型控制连接到同一个本地服务。人通过 Windows 原生桌面窗口 查看证据，模型通过 MCP 查询、配置和执行受限制的调试操作。用户仍在自己的客户端或应用中设置 HTTP 代理；未经过该代理的流量不在本版采集范围内。
+NetLens 将应用层流量记录与大模型控制连接到同一个本地服务。人通过 Windows 原生桌面窗口查看证据，模型通过 MCP 查询、配置和执行受限制的调试操作。用户仍在自己的客户端或应用中设置 HTTP 代理；未经过该代理的流量不在本版采集范围内。
 
-v0.2.0 交付包含 HTTP(S) 显式代理、有界内存、脱敏公开视图、HAR、可选 JSONL、MCP stdio／Streamable HTTP、Windows 原生桌面窗口、规则与重放。网卡抓包和协议层分析不包含在本版。当前会剥离 HTTP trailers，不支持完整 gRPC 语义，也不提供 gRPC message 解码。
+v0.3.0 交付包含 HTTP(S) 显式代理、有界内存、脱敏公开视图、HAR、可选 JSONL、MCP stdio／Streamable HTTP、Windows 原生桌面窗口、规则与重放。网卡抓包和协议层分析不包含在本版。当前会剥离 HTTP trailers，不支持完整 gRPC 语义，也不提供 gRPC message 解码。
 
 ## 2. 数据路径与控制路径
 
@@ -15,7 +15,7 @@ flowchart TD
     Proxy --> Store["有界内存记录"]
     Store --> View["脱敏视图"]
     View --> MCP["MCP 工具"]
-    View --> UI["Windows 原生桌面窗口 和 API"]
+    View --> UI["Windows 原生桌面窗口和 API"]
     View --> Export["HAR 和可选 JSONL"]
     Model["模型与 MCP 客户端"] --> MCP
     MCP --> Control["配置与操作校验"]
@@ -36,6 +36,7 @@ flowchart TD
 | `internal/app` | Service、权限校验、API、listener | 业务权限不能只依赖 MCP annotations |
 | `internal/proxy` | HTTP 转发、CONNECT、TLS MITM、规则、重放与时间观测 | 验证上游 TLS；防止代理回环；不解析非 HTTP 应用协议 |
 | `internal/capture` | 有界记录、查询、统计、脱敏、HAR 和轮转日志 | 原始内部结构不直接成为外部响应 |
+| `internal/systemproxy` / `internal/wincert` | 用户代理备份／恢复、精确证书信任管理 | 桌面显式确认，不向 MCP 开放系统操作 |
 | `internal/model` | Flow、Body、Timings、Filter、Rule | 把采集限制、完成状态和关联 ID 显式表达 |
 | `internal/mcpserver` | SDK、工具 schema、传输、结构化结果和错误 | SDK 处理协议，Service 执行实际操作限制 |
 
@@ -63,7 +64,7 @@ stdio 模式也会启动代理和控制 listener，因此不能与同端口的�
 
 开启 `--mitm` 后，代理使用本实例 CA 为目标主机生成证书。客户端必须明确信任这个 CA。NetLens 与上游建立另一条 TLS 连接并验证其正常证书链和主机名；内部自签服务需要单独配置对应信任根。
 
-CA 位于 `<data-dir>/ca/`。`ca.pem` 可用于客户端信任，`ca-key.pem` 是本实例私钥。CA 不自动安装到系统；上游 TLS 校验不能关闭。证书锁定和客户端 mTLS 不在当前支持范围内。
+CA 位于 `<data-dir>/ca/`。`ca.pem` 可用于客户端信任，`ca-key.pem` 是本实例私钥。桌面按钮可显式安装／检查／移除本实例用户级根证书；上游 TLS 校验不能关闭。证书锁定和客户端 mTLS 不在当前支持范围内。
 
 ## 6. 记录与数据语义
 

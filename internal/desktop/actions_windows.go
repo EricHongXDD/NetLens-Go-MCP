@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/lxn/walk"
@@ -150,14 +151,9 @@ func (w *window) connectionInfo() {
 		return
 	}
 	s := w.runtime.Service
-	status := s.Status()
-	config := map[string]any{"mcpServers": map[string]any{"netlens": map[string]any{
-		"type": "http", "url": "http://" + status["control_addr"].(string) + "/mcp",
-		"headers": map[string]string{"Authorization": "Bearer " + s.Config.Token},
-	}}}
-	text := "连接正在运行的桌面软件，请在 MCP 客户端使用以下 HTTP 配置。\r\n\r\n" + pretty(config) +
+	text := "连接正在运行的桌面软件，请在 MCP 客户端使用以下 HTTP 配置。\r\n\r\n" + strings.ReplaceAll(s.ClientConfig(), "\n", "\r\n") +
 		"\r\n\r\n用户数据目录：" + w.cfg.DataDir + "\r\nCA 证书：" + s.CA.CertPath() +
-		"\r\n\r\nHTTPS 解密需要测试客户端信任此 CA。程序不会自动修改系统代理或证书。"
+		"\r\n\r\nHTTPS 解密需要测试客户端信任此 CA。可以使用左侧证书和系统代理按钮管理本机配置。"
 	w.showText("MCP 连接与证书", text)
 }
 
@@ -165,7 +161,7 @@ func (w *window) showText(title, text string) {
 	var dialog *walk.Dialog
 	var closeButton *walk.PushButton
 	err := (d.Dialog{
-		AssignTo: &dialog, Title: title, Size: d.Size{Width: 800, Height: 600}, MinSize: d.Size{Width: 650, Height: 450},
+		AssignTo: &dialog, Title: title, Background: brush(panel), Size: d.Size{Width: 800, Height: 600}, MinSize: d.Size{Width: 650, Height: 450},
 		CancelButton: &closeButton, Layout: d.VBox{}, Font: d.Font{Family: "Microsoft YaHei UI", PointSize: 10},
 		Children: []d.Widget{
 			d.TextEdit{Text: text, ReadOnly: true, VScroll: true, HScroll: true, MaxLength: 1 << 20, Font: d.Font{Family: "Consolas", PointSize: 10}},
@@ -184,6 +180,10 @@ func (w *window) showText(title, text string) {
 		return
 	}
 	defer dialog.Dispose()
+	if err := applyTheme(dialog); err != nil {
+		w.fail(err)
+		return
+	}
 	dialog.Run()
 }
 
@@ -199,7 +199,7 @@ func (w *window) manageRules() {
 	var editor *walk.TextEdit
 	var cancel *walk.PushButton
 	err := (d.Dialog{
-		AssignTo: &dialog, Title: "规则管理", Size: d.Size{Width: 900, Height: 750}, MinSize: d.Size{Width: 750, Height: 600},
+		AssignTo: &dialog, Title: "规则管理", Background: brush(panel), Size: d.Size{Width: 900, Height: 750}, MinSize: d.Size{Width: 750, Height: 600},
 		CancelButton: &cancel, Layout: d.VBox{}, Font: d.Font{Family: "Microsoft YaHei UI", PointSize: 10},
 		Children: []d.Widget{
 			d.Label{Text: "当前规则（脱敏预览）"},
@@ -236,5 +236,9 @@ func (w *window) manageRules() {
 		return
 	}
 	defer dialog.Dispose()
+	if err := applyTheme(dialog); err != nil {
+		w.fail(err)
+		return
+	}
 	dialog.Run()
 }

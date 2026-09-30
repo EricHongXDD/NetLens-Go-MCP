@@ -15,57 +15,64 @@ import (
 	"time"
 
 	"github.com/lxn/walk"
-	d "github.com/lxn/walk/declarative"
 
 	"netlens/internal/app"
 	"netlens/internal/capture"
 	"netlens/internal/model"
+	"netlens/internal/systemproxy"
 )
 
 type window struct {
-	mw            *walk.MainWindow
-	cfg           app.Config
-	runtime       *app.Runtime
-	settings      *walk.Composite
-	proxyAddr     *walk.LineEdit
-	controlAddr   *walk.LineEdit
-	mitm          *walk.CheckBox
-	rules         *walk.CheckBox
-	replay        *walk.CheckBox
-	persist       *walk.CheckBox
-	serverButton  *walk.PushButton
-	pauseButton   *walk.PushButton
-	auto          *walk.CheckBox
-	status        *walk.Label
-	notice        *walk.Label
-	hosts         *walk.LineEdit
-	url           *walk.LineEdit
-	method        *walk.ComboBox
-	statusFilter  *walk.ComboBox
-	slow          *walk.NumberEdit
-	errorsOnly    *walk.CheckBox
-	table         *walk.TableView
-	model         *flowModel
-	tabs          *walk.TabWidget
-	overview      *walk.TextEdit
-	request       *walk.TextEdit
-	response      *walk.TextEdit
-	json          *walk.TextEdit
-	stats         *walk.TextEdit
-	next          *walk.PushButton
-	previous      *walk.PushButton
-	pageLabel     *walk.Label
-	query         model.Query
-	nextCursor    uint64
-	cursors       []uint64
-	selectedID    string
-	baselineID    string
-	detail        any
-	refreshing    bool
-	replayBusy    bool
-	closing       atomic.Bool
-	refreshQueued atomic.Bool
-	done          chan struct{}
+	mw                 *walk.MainWindow
+	cfg                app.Config
+	runtime            *app.Runtime
+	settings           *walk.Composite
+	proxyAddr          *walk.LineEdit
+	controlAddr        *walk.LineEdit
+	mitm               *walk.CheckBox
+	rules              *walk.CheckBox
+	replay             *walk.CheckBox
+	persist            *walk.CheckBox
+	serverButton       *walk.PushButton
+	pauseButton        *walk.PushButton
+	auto               *walk.CheckBox
+	status             *walk.Label
+	notice             *walk.Label
+	hosts              *walk.LineEdit
+	url                *walk.LineEdit
+	method             *walk.ComboBox
+	statusFilter       *walk.ComboBox
+	slow               *walk.NumberEdit
+	errorsOnly         *walk.CheckBox
+	table              *walk.TableView
+	model              *flowModel
+	tabs               *walk.TabWidget
+	overview           *walk.TextEdit
+	request            *walk.TextEdit
+	response           *walk.TextEdit
+	json               *walk.TextEdit
+	stats              *walk.TextEdit
+	next               *walk.PushButton
+	previous           *walk.PushButton
+	pageLabel          *walk.Label
+	query              model.Query
+	nextCursor         uint64
+	cursors            []uint64
+	selectedID         string
+	baselineID         string
+	detail             any
+	refreshing         bool
+	replayBusy         bool
+	closing            atomic.Bool
+	refreshQueued      atomic.Bool
+	done               chan struct{}
+	systemProxy        *systemproxy.Manager
+	proxyManaged       bool
+	certStatus         *walk.Label
+	proxyStatus        *walk.Label
+	mcpAddress         *walk.Label
+	trafficSummary     *walk.Label
+	restoreProxyButton *walk.PushButton
 }
 
 type flowModel struct {
@@ -104,11 +111,26 @@ func (m *flowModel) Value(row, col int) any {
 
 func Run(cfg app.Config, testResult string) error {
 	w := &window{cfg: cfg, model: &flowModel{}, query: model.Query{Limit: 100}, done: make(chan struct{})}
+	if testResult == "" {
+		var err error
+		w.systemProxy, err = systemproxy.NewWindows()
+		if err != nil {
+			return err
+		}
+	} else {
+		// 桌面自检使用隔离后端，绝不修改开发者的系统代理。
+		w.systemProxy = isolatedProxyManager(cfg.DataDir)
+	}
 	if err := w.create(); err != nil {
 		return err
 	}
 	defer w.mw.Dispose()
-	w.mw.Closing().Attach(func(_ *bool, _ walk.CloseReason) {
+	w.mw.Closing().Attach(func(canceled *bool, _ walk.CloseReason) {
+		if err := w.restoreOnStop(); err != nil {
+			w.fail(err)
+			*canceled = true
+			return
+		}
 		if w.closing.CompareAndSwap(false, true) {
 			close(w.done)
 			w.stopService()
@@ -136,94 +158,6 @@ func Run(cfg app.Config, testResult string) error {
 	return nil
 }
 
-func (w *window) create() error {
-	mono := d.Font{Family: "Consolas", PointSize: 10}
-	textPage := func(title string, target **walk.TextEdit) d.TabPage {
-		return d.TabPage{Title: title, Layout: d.VBox{}, Children: []d.Widget{
-			d.TextEdit{AssignTo: target, ReadOnly: true, VScroll: true, HScroll: true, Font: mono, MaxLength: 1 << 20},
-		}}
-	}
-	return (d.MainWindow{
-		AssignTo: &w.mw, Title: "NetLens " + model.Version + " · 网络流量调试",
-		Size: d.Size{Width: 1380, Height: 850}, MinSize: d.Size{Width: 1100, Height: 700}, Font: d.Font{Family: "Microsoft YaHei UI", PointSize: 10},
-		Layout: d.VBox{Margins: d.Margins{Left: 16, Top: 14, Right: 16, Bottom: 12}, Spacing: 10},
-		Children: []d.Widget{
-			d.Composite{Layout: d.HBox{MarginsZero: true}, Children: []d.Widget{
-				d.Label{Text: "NetLens", Font: d.Font{Family: "Segoe UI", PointSize: 22, Bold: true}},
-				d.Label{Text: "HTTP / HTTPS 流量调试", StretchFactor: 1},
-				d.Label{AssignTo: &w.status, Text: "服务尚未启动"},
-			}},
-			d.Composite{AssignTo: &w.settings, Layout: d.HBox{MarginsZero: true}, Children: []d.Widget{
-				d.Label{Text: "代理"}, d.LineEdit{AssignTo: &w.proxyAddr, Text: w.cfg.ProxyAddr, MinSize: d.Size{Width: 145, Height: 0}, MaxSize: d.Size{Width: 185, Height: 0}},
-				d.Label{Text: "MCP / API"}, d.LineEdit{AssignTo: &w.controlAddr, Text: w.cfg.ControlAddr, MinSize: d.Size{Width: 145, Height: 0}, MaxSize: d.Size{Width: 185, Height: 0}},
-				d.CheckBox{AssignTo: &w.mitm, Text: "HTTPS 解密", Checked: w.cfg.MITM, ToolTipText: "测试客户端需信任本实例 CA"},
-				d.CheckBox{AssignTo: &w.rules, Text: "启用规则", Checked: w.cfg.AllowRules},
-				d.CheckBox{AssignTo: &w.replay, Text: "启用重放", Checked: w.cfg.AllowReplay},
-				d.CheckBox{AssignTo: &w.persist, Text: "保存脱敏日志", Checked: w.cfg.Persist},
-			}},
-			d.Composite{Layout: d.HBox{MarginsZero: true}, Children: []d.Widget{
-				d.PushButton{AssignTo: &w.serverButton, Text: "启动服务", OnClicked: w.toggleService},
-				d.PushButton{AssignTo: &w.pauseButton, Text: "暂停采集", OnClicked: w.toggleCapture},
-				d.PushButton{Text: "清空记录", OnClicked: w.clearFlows},
-				d.PushButton{Text: "导出 HAR", OnClicked: w.exportHAR},
-				d.PushButton{Text: "规则管理", OnClicked: w.manageRules},
-				d.PushButton{Text: "MCP 连接", OnClicked: w.connectionInfo},
-				d.HSpacer{},
-				d.CheckBox{AssignTo: &w.auto, Text: "每秒刷新", Checked: true},
-				d.PushButton{Text: "刷新", OnClicked: w.refresh},
-			}},
-			d.GroupBox{Title: "查找流量", Layout: d.VBox{Spacing: 8}, Children: []d.Widget{
-				d.Composite{Layout: d.HBox{MarginsZero: true}, Children: []d.Widget{
-					d.Label{Text: "主机"}, d.LineEdit{AssignTo: &w.hosts, CueBanner: "example.com, *.example.com", StretchFactor: 1},
-					d.Label{Text: "URL"}, d.LineEdit{AssignTo: &w.url, CueBanner: "路径或查询字符串", StretchFactor: 2},
-					d.ComboBox{AssignTo: &w.method, Model: []string{"全部方法", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT"}, CurrentIndex: 0, MinSize: d.Size{Width: 100, Height: 0}},
-					d.ComboBox{AssignTo: &w.statusFilter, Model: []string{"全部状态", "2xx", "3xx", "4xx", "5xx"}, CurrentIndex: 0, MinSize: d.Size{Width: 95, Height: 0}},
-					d.Label{Text: "慢于"}, d.NumberEdit{AssignTo: &w.slow, MinValue: 0, MaxValue: 600000, Suffix: " ms", MinSize: d.Size{Width: 105, Height: 0}},
-				}},
-				d.Composite{Layout: d.HBox{MarginsZero: true}, Children: []d.Widget{
-					d.CheckBox{AssignTo: &w.errorsOnly, Text: "只看错误"},
-					d.PushButton{Text: "筛选", OnClicked: w.applyFilter},
-					d.PushButton{Text: "重置", OnClicked: w.resetFilter},
-					d.HSpacer{},
-					d.PushButton{Text: "同时应用为采集条件", OnClicked: w.applyCaptureFilter},
-					d.PushButton{Text: "采集所有主机", OnClicked: w.clearCaptureFilter},
-				}},
-			}},
-			d.HSplitter{StretchFactor: 1, Children: []d.Widget{
-				d.Composite{StretchFactor: 3, Layout: d.VBox{MarginsZero: true}, Children: []d.Widget{
-					d.TableView{AssignTo: &w.table, Model: w.model, AlternatingRowBG: true, ColumnsSizable: true, NotSortableByHeaderClick: true,
-						OnCurrentIndexChanged: w.selectFlow, Columns: []d.TableViewColumn{
-							{Title: "序号", Width: 55}, {Title: "方法", Width: 75}, {Title: "状态", Width: 90},
-							{Title: "URL", Width: 380}, {Title: "耗时", Width: 90}, {Title: "大小", Width: 80}, {Title: "时间", Width: 85},
-						}, StyleCell: func(style *walk.CellStyle) {
-							if style.Row() >= 0 && style.Row() < len(w.model.items) && style.Col() == 2 && w.model.items[style.Row()].StatusCode >= 400 {
-								style.TextColor = walk.RGB(180, 35, 45)
-							}
-						}},
-					d.Composite{Layout: d.HBox{MarginsZero: true}, Children: []d.Widget{
-						d.Label{AssignTo: &w.pageLabel, Text: "暂无记录", StretchFactor: 1},
-						d.PushButton{Text: "最新", OnClicked: func() { w.query.BeforeSequence = 0; w.cursors = nil; w.refresh() }},
-						d.PushButton{AssignTo: &w.previous, Text: "上一页", OnClicked: w.previousPage},
-						d.PushButton{AssignTo: &w.next, Text: "下一页", OnClicked: w.nextPage},
-					}},
-				}},
-				d.Composite{StretchFactor: 2, Layout: d.VBox{MarginsZero: true}, Children: []d.Widget{
-					d.TabWidget{AssignTo: &w.tabs, Pages: []d.TabPage{
-						textPage("概览", &w.overview), textPage("请求", &w.request), textPage("响应", &w.response), textPage("JSON", &w.json), textPage("统计", &w.stats),
-					}},
-					d.Composite{Layout: d.HBox{MarginsZero: true}, Children: []d.Widget{
-						d.PushButton{Text: "复制详情", OnClicked: w.copyDetail},
-						d.PushButton{Text: "设为基准", OnClicked: w.setBaseline},
-						d.PushButton{Text: "对比", OnClicked: w.compare},
-						d.PushButton{Text: "重放", OnClicked: w.replaySelected},
-					}},
-				}},
-			}},
-			d.Label{AssignTo: &w.notice, Text: "将待调试应用的代理设为 127.0.0.1:8080，流量会显示在列表中。详情自动脱敏。"},
-		},
-	}).Create()
-}
-
 func (w *window) startService() error {
 	w.cfg.ProxyAddr, w.cfg.ControlAddr = strings.TrimSpace(w.proxyAddr.Text()), strings.TrimSpace(w.controlAddr.Text())
 	w.cfg.MITM, w.cfg.AllowRules = w.mitm.Checked(), w.rules.Checked()
@@ -240,10 +174,16 @@ func (w *window) startService() error {
 	w.serverButton.SetText("停止服务")
 	w.pauseButton.SetEnabled(true)
 	w.refresh()
+	w.mcpAddress.SetText("http://" + r.Service.Status()["control_addr"].(string) + "/mcp")
+	w.refreshIntegration()
 	return nil
 }
 
 func (w *window) stopService() {
+	if err := w.restoreOnStop(); err != nil {
+		w.fail(err)
+		return
+	}
 	if w.runtime != nil {
 		_ = w.runtime.Close()
 		w.runtime = nil
@@ -256,6 +196,8 @@ func (w *window) stopService() {
 	w.pauseButton.SetEnabled(false)
 	w.status.SetText("服务已停止")
 	w.notice.SetText("修改上方配置后点击“启动服务”，开始新的采集会话。")
+	w.mcpAddress.SetText("MCP 服务尚未启动")
+	w.refreshIntegration()
 }
 
 func (w *window) toggleService() {
@@ -313,6 +255,7 @@ func (w *window) refresh() {
 	w.next.SetEnabled(w.nextCursor != 0)
 	w.previous.SetEnabled(len(w.cursors) > 0)
 	w.pageLabel.SetText(fmt.Sprintf("显示 %d 条 · 本页范围匹配 %d 条", len(q.Items), q.Matched))
+	w.trafficSummary.SetText(fmt.Sprintf("%d 条匹配 · 每页 100 条", q.Matched))
 	index := -1
 	for i, item := range q.Items {
 		if item.ID == w.selectedID {

@@ -16,3 +16,5 @@
 control.token
 /SHA256SUMS
 *.syso
+
+*.private.md

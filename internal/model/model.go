@@ -9,7 +9,7 @@ import (
 )
 
 // Version 可通过构建参数注入，使桌面软件、CLI、API 与 MCP 使用同一发布版本。
-var Version = "0.2.0"
+var Version = "0.3.0"
 
 type Body struct {
 	Data      []byte `json:"-"`

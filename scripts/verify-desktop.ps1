@@ -27,7 +27,7 @@ if (-not $process.WaitForExit(60000)) {
 if ($process.ExitCode -ne 0) { throw "Native desktop failed with exit code $($process.ExitCode)" }
 $result = Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json
 if (-not $result.success -or $result.version -ne $Version) { throw 'Native desktop self-test result or version mismatch.' }
-foreach ($check in @('native_window', 'proxy_capture', 'redacted_details', 'native_filtering', 'pause_resume', 'har_export', 'no_web_ui', 'service_shutdown')) {
+foreach ($check in @('native_window', 'proxy_capture', 'redacted_details', 'native_filtering', 'pause_resume', 'har_export', 'no_web_ui', 'service_shutdown', 'proxy_restore', 'mcp_config', 'ai_guide')) {
     if ($result.checks -notcontains $check) { throw "Missing native check: $check" }
 }
 Write-Output "Native desktop verified: $($result.checks -join ', ')"

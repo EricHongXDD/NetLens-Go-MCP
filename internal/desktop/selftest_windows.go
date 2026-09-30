@@ -17,11 +17,21 @@ import (
 	"time"
 
 	"netlens/internal/model"
+	"netlens/internal/systemproxy"
 )
+
+type isolatedProxyBackend struct{ settings systemproxy.Settings }
+
+func (b *isolatedProxyBackend) Read() (systemproxy.Settings, error) { return b.settings, nil }
+func (b *isolatedProxyBackend) Write(s systemproxy.Settings) error  { b.settings = s; return nil }
+func (*isolatedProxyBackend) Lock() (func(), error)                 { return func() {}, nil }
+func isolatedProxyManager(dir string) *systemproxy.Manager {
+	return systemproxy.New(filepath.Join(dir, "isolated-proxy-backup.json"), &isolatedProxyBackend{settings: systemproxy.Settings{Flags: 9, PAC: "https://example.invalid/proxy.pac"}})
+}
 
 func writeTestResult(path string, testErr error) error {
 	result := map[string]any{"success": testErr == nil, "version": model.Version,
-		"checks": []string{"native_window", "proxy_capture", "redacted_details", "native_filtering", "pause_resume", "har_export", "no_web_ui", "service_shutdown"}}
+		"checks": []string{"native_window", "proxy_capture", "redacted_details", "native_filtering", "pause_resume", "har_export", "no_web_ui", "service_shutdown", "proxy_restore", "mcp_config", "ai_guide"}}
 	if testErr != nil {
 		result["error"] = testErr.Error()
 	}
@@ -39,10 +49,34 @@ func (w *window) selfTest() error {
 	if w.mw.Handle() == 0 || w.table.Handle() == 0 || w.tabs.Pages().Len() != 5 || w.runtime == nil {
 		return errors.New("native controls or shared service were not created")
 	}
+	// 验证新操作的恢复与导出逻辑，但不改变真实系统代理或信任存储。
+	proxyBefore, err := w.systemProxy.Status()
+	if err != nil {
+		return err
+	}
 	s := w.runtime.Service
 	status := s.Status()
 	proxyAddress := status["proxy_addr"].(string)
 	controlAddress := status["control_addr"].(string)
+	if err := w.systemProxy.Enable(proxyAddress); err != nil {
+		return err
+	}
+	w.proxyManaged = true
+	if state, err := w.systemProxy.Status(); err != nil || !state.Owned {
+		return errors.New("system proxy manager did not take ownership")
+	}
+	config := s.ClientConfig()
+	if !json.Valid([]byte(config)) || !strings.Contains(config, controlAddress) {
+		return errors.New("MCP configuration is invalid")
+	}
+	guidePath := filepath.Join(w.cfg.DataDir, "NetLens-AI-Guide.private.md")
+	if err := w.saveAIGuide(guidePath); err != nil {
+		return err
+	}
+	guide, err := os.ReadFile(guidePath)
+	if err != nil || !strings.Contains(string(guide), "requests_replay") || !strings.Contains(string(guide), controlAddress) {
+		return errors.New("AI guide export failed")
+	}
 	proxyURL, _ := url.Parse("http://" + proxyAddress)
 	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
 	defer transport.CloseIdleConnections()
@@ -140,6 +174,9 @@ func (w *window) selfTest() error {
 		return errors.New("control port still exposes Web UI")
 	}
 	w.stopService()
+	if after, err := w.systemProxy.Status(); err != nil || after.Current != proxyBefore.Current || after.HasBackup {
+		return errors.New("stopping desktop did not restore original proxy")
+	}
 	for _, address := range []string{proxyAddress, controlAddress} {
 		listener, err := net.Listen("tcp", address)
 		if err != nil {

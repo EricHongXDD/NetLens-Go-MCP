@@ -8,13 +8,21 @@
 
 窗口自动启动代理 `127.0.0.1:8080` 和 API/MCP 服务 `127.0.0.1:9090`。测试应用需要配置代理，流量表会自动刷新。选中请求可查看脱敏概览、请求、响应和 JSON；可以筛选、分页、暂停记录、导出 HAR、设置比较基准、比较请求。规则和重放需要先停止服务，在窗口勾选对应权限后重新启动。
 
-HTTPS 解密需要在窗口勾选并重启服务，且测试客户端明确信任 `%APPDATA%\NetLens\ca\ca.pem`。软件不会自动修改系统代理或系统证书信任。关闭窗口会停止服务；同一端口只能运行一个实例。
+HTTPS 解密需要在窗口勾选并重启服务，且测试客户端明确信任 `%APPDATA%\NetLens\ca\ca.pem`。左侧“安装／检查／移除”按钮管理本实例 CA 的用户级信任；“开启系统代理”切换当前用户的 HTTP/HTTPS 代理，“恢复原代理”恢复开启前的手动代理、PAC、绕过列表和自动检测设置。关闭窗口或停止服务时自动恢复本窗口开启的代理；同一端口只能运行一个实例。
 
 用户数据默认位于 `%APPDATA%\NetLens`，包括令牌、CA 和可选脱敏日志。升级、卸载保留用户数据；重新安装复用令牌与 CA。
 
+## 证书与系统代理
+
+- **安装证书**：确认后仅将本实例公开 CA 导入当前用户根证书存储，不导入私钥，不修改机器级信任。Windows 可能要求额外的系统确认，取消时软件会报告失败。
+- **检查证书**：显示 SHA-256 指纹、有效期、用户／机器信任状态及证书路径。
+- **移除证书**：只删除完整证书精确匹配的用户级信任；本地 CA 文件和其他根证书保留。机器级信任需管理员自行处理。
+- **开启系统代理**：必须先启动服务。暂时关闭 PAC 和自动检测，使用实际监听地址设置 HTTP/HTTPS 代理；本机地址默认绕过。只影响遵循 Windows Internet 设置的应用，不修改 WinHTTP、VPN 或环境变量。
+- **恢复原代理**：原配置先写入 `%APPDATA%\NetLens\system-proxy-backup.json` 后才切换。正常退出自动恢复；异常退出后重新打开软件，可手动恢复。恢复失败会保留备份。如果其他程序改变代理，自动恢复不会覆盖，手动恢复会要求确认。
+
 ## MCP 与命令行
 
-连接当前桌面实例时，点击 **MCP 连接** 获取 Streamable HTTP 配置和令牌。API/MCP 共用窗口中的记录，控制端口不提供网页。
+连接当前桌面实例时，点击 **复制 MCP 配置** 一键复制完整 JSON；也可查看 **连接与证书详情**。点击 **导出 AI 操作手册** 保存 UTF-8 Markdown，包含实际地址、令牌、当前权限、11 个工具和排查步骤。手册等同于访问凭据，默认文件名为 `NetLens-AI-Guide.private.md`，请只提供给授权本机客户端。API/MCP 共用窗口中的记录，控制端口不提供网页。
 
 stdio 使用独立的 `netlens-cli.exe`，参考安装目录的 `examples/mcp-windows.json`。替换模板中的用户和安装目录为实际绝对路径。stdio 客户端启动子进程前结束占用同一端口的桌面实例；客户端断开后子进程退出。
 
@@ -38,8 +46,8 @@ $desktop = Join-Path $env:LOCALAPPDATA 'Programs\NetLens\NetLens.exe'
 普通构建从 Actions 运行的 **Artifacts → NetLens-windows-amd64** 下载，保留 30 天。推送 `vMAJOR.MINOR.PATCH` 标签后，工作流将标签版本注入程序，并把安装包、便携 ZIP 和 SHA256 校验文件发布到 Releases。
 
 ```powershell
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 ## 源码构建与打包
@@ -54,7 +62,7 @@ git push origin v0.2.0
 打包还需要 [Inno Setup](https://jrsoftware.org/isdl.php)：
 
 ```powershell
-./scripts/package-windows.ps1 -Version 0.2.0 -ISCC 'C:\实际路径\ISCC.exe'
+./scripts/package-windows.ps1 -Version 0.3.0 -ISCC 'C:\实际路径\ISCC.exe'
 ```
 
 构建脚本生成公共控件及 DPI manifest 资源并编译 GUI 程序。打包结果位于 `dist`，包含安装包、便携 ZIP 和 `SHA256SUMS.txt`。本地打包不安装软件；安装验收只在隔离 CI runner 中执行。

@@ -38,6 +38,11 @@ jobs:
       - run: go mod verify
       - run: go vet ./...
       - run: go test ./...
+      - name: Verify isolated Windows system proxy
+        if: runner.os == 'Windows'
+        env:
+          NETLENS_SYSTEM_TEST: '1'
+        run: go test ./internal/systemproxy -run TestWindowsProxyRoundTripInIsolatedRunner -count=1 -v
       - name: Race detector
         if: runner.os == 'Linux'
         run: go test -race ./...
