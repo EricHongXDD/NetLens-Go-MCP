@@ -292,7 +292,7 @@ func TestIntegrationMCPProxyInvestigation(t *testing.T) {
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	wantNames := []string{"capture_configure", "capture_status", "flows_clear", "flows_compare", "flows_export_har", "flows_get", "flows_list", "flows_stats", "requests_replay", "rules_list", "rules_replace"}
+	wantNames := []string{"capture_configure", "capture_status", "flows_body", "flows_clear", "flows_compare", "flows_export_har", "flows_get", "flows_list", "flows_stats", "requests_replay", "rules_list", "rules_replace"}
 	if !slices.Equal(names, wantNames) {
 		t.Fatalf("discoverable tools=%v, want %v", names, wantNames)
 	}

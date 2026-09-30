@@ -74,11 +74,51 @@ func (w *window) copyDetail() {
 		w.notice.SetText("请先选择一条流量记录。")
 		return
 	}
-	if err := walk.Clipboard().SetText(pretty(w.detail)); err != nil {
+	text := pretty(w.detail)
+	if w.tabs.CurrentIndex() == 1 {
+		text = w.request.Text()
+	} else if w.tabs.CurrentIndex() == 2 {
+		text = w.response.Text()
+	}
+	if err := walk.Clipboard().SetText(text); err != nil {
 		w.fail(err)
 		return
 	}
-	w.notice.SetText("已复制当前记录的脱敏 JSON。")
+	w.notice.SetText("已复制当前详情；请求／响应复制遵循完整正文开关。")
+}
+
+func (w *window) exportBody() {
+	if !w.requireService() || w.selectedID == "" {
+		w.notice.SetText("请先选择一条流量记录。")
+		return
+	}
+	flow, ok := w.runtime.Service.Store.Get(w.selectedID)
+	if !ok || !flow.RawAvailable {
+		w.notice.SetText("该记录的原始正文不可用。")
+		return
+	}
+	body, side := flow.ResponseBody, "response"
+	if w.tabs.CurrentIndex() == 1 {
+		body, side = flow.RequestBody, "request"
+	}
+	dlg := walk.FileDialog{Title: "导出完整原始正文（未脱敏）", Filter: "正文文件 (*.body)|*.body|所有文件 (*.*)|*.*", FilePath: "netlens-" + side + "-" + flow.ID + ".body"}
+	accepted, err := dlg.ShowSave(w.mw)
+	if err != nil {
+		w.fail(err)
+		return
+	}
+	if !accepted {
+		return
+	}
+	// 原始正文按字节写出，保留服务器编码及压缩形式，不做字符编码转换。
+	if err := os.WriteFile(dlg.FilePath, body.Data, 0600); err != nil {
+		w.fail(err)
+		return
+	}
+	w.notice.SetText(fmt.Sprintf("已导出 %s 正文 %d 字节（未脱敏）", side, len(body.Data)))
+	if body.Truncated || body.Size > int64(len(body.Data)) {
+		w.notice.SetText("已导出保留的原始字节；采集已截断，缺失部分无法恢复。")
+	}
 }
 
 func (w *window) setBaseline() {

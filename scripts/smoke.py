@@ -97,7 +97,8 @@ def main():
                                   "clientInfo": {"name": "netlens-smoke", "version": "1"}})
                 assert initialize["serverInfo"]["name"] == "netlens"
                 rpc("notifications/initialized", {}, notification=True)
-                assert len(rpc("tools/list", {})["tools"]) == 11
+                names = {item["name"] for item in rpc("tools/list", {})["tools"]}
+                assert {"flows_body", "flows_get", "flows_list", "requests_replay"} <= names
                 state = tool("capture_status", {})
                 proxy_host, proxy_port = state["proxy_addr"].rsplit(":", 1)
                 target = "http://127.0.0.1:%d/check?api_key=QUERY-SECRET" % upstream.server_port
@@ -117,6 +118,11 @@ def main():
                 assert flows and flows[0]["completed"], flows
                 flow_id = flows[0]["id"]
                 detail = tool("flows_get", {"id": flow_id})
+
+                # 完整正文独立读取，普通详情仍需通过脱敏断言。
+                full = tool("flows_body", {"id": flow_id, "side": "response"})
+                assert full["text"].encode("utf-8") == original_body
+                assert full["redaction"] == "none" and not full["has_more"]
                 serialized = json.dumps(detail)
                 for secret in ("QUERY-SECRET", "HEADER-SECRET", "RESPONSE-SECRET", "COOKIE-SECRET"):
                     assert secret not in serialized, secret
@@ -143,7 +149,7 @@ def main():
                 assert cleared["removed"] == 2
                 process.stdin.close()  # Client disconnect must stop both listeners.
                 assert process.wait(timeout=10) == 0
-                print("PASS: real stdio MCP handshake, 11 tools, proxy capture, redaction, replay, shared control state, auth, HAR and graceful EOF shutdown")
+                print("PASS: real stdio MCP handshake, full body, proxy capture, redaction, replay, shared control state, auth, HAR and graceful EOF shutdown")
             except Exception:
                 stderr.flush()
                 stderr.seek(0)

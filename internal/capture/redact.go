@@ -193,6 +193,8 @@ func redactJSON(value any, depth int) any {
 }
 
 func parseStructuredJSON(data []byte) (any, bool) {
+	// 容忍接口返回的 UTF-8 BOM，其他尾随内容仍必须严格拒绝。
+	data = bytes.TrimPrefix(bytes.TrimSpace(data), []byte{0xef, 0xbb, 0xbf})
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	var value any
@@ -256,11 +258,25 @@ func publicBody(body model.Body, headers http.Header, limit int) map[string]any 
 		return hide("missing or invalid Content-Type")
 	}
 	var text []byte
+	// 某些接口把完整 JSON 错标为文本；仅严格解析对象或数组后沿用脱敏流程。
+	// 不展示 HTML、任意文本、JSON 标量或包含额外内容的响应。
+	var detectedJSON any
+	if mediaType == "text/html" || mediaType == "text/plain" {
+		if value, ok := parseStructuredJSON(body.Data); ok {
+			detectedJSON = value
+			view["declared_content_type"] = mediaType
+			view["content_type_mismatch"] = true
+		}
+	}
 	switch {
-	case mediaType == "application/json" || strings.HasSuffix(mediaType, "+json"):
-		value, ok := parseStructuredJSON(body.Data)
-		if !ok {
-			return hide("invalid or unstructured JSON cannot be reliably redacted")
+	case detectedJSON != nil || mediaType == "application/json" || strings.HasSuffix(mediaType, "+json"):
+		value := detectedJSON
+		if value == nil {
+			var ok bool
+			value, ok = parseStructuredJSON(body.Data)
+			if !ok {
+				return hide("invalid or unstructured JSON cannot be reliably redacted")
+			}
 		}
 		// Compact JSON avoids an indentation multiplier for deeply nested
 		// untrusted structures before applying the display-byte limit.
@@ -357,9 +373,7 @@ func PublicSummary(flow model.Flow) model.Summary {
 	}
 }
 
-// PublicFlow deliberately has no raw-body or raw-header escape hatch. Raw
-// snapshots are an internal capability for forwarding and explicit replay.
-// The returned maps and slices are independent of the captured snapshot.
+// PublicFlow 始终返回独立的脱敏视图；完整正文由单独的显式读取入口提供。
 func PublicFlow(flow model.Flow, bodyLimit int) map[string]any {
 	return map[string]any{
 		"id": flow.ID, "sequence": flow.Sequence, "started_at": flow.StartedAt,
@@ -373,7 +387,8 @@ func PublicFlow(flow model.Flow, bodyLimit int) map[string]any {
 		"timings":          flow.Timings, "error": publicError(flow.Error),
 		"source": flow.Source, "parent_id": flow.ParentID,
 		"rule_ids": append([]string{}, flow.RuleIDs...), "completed": flow.Completed,
-		"raw_available": flow.RawAvailable,
+		"raw_available":    flow.RawAvailable,
+		"body_detail_tool": "flows_body",
 		"redaction": map[string]any{
 			"enabled":              true,
 			"error_details_hidden": flow.Error != "",

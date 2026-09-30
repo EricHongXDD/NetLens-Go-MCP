@@ -23,7 +23,7 @@ flowchart TD
     Control --> Proxy
 ```
 
-代理使用流式转发，并在读取时只保留受 `body-limit` 限制的正文样本。原始内容只存在于进程内部；所有面向操作者、模型和落盘流量文件的输出经过统一脱敏。原始请求的有限保留也为明确授权的重放提供依据。
+代理使用流式转发，并在读取时只保留受 `body-limit` 限制的正文样本。默认每正文保留上限为 1 MiB。常规详情、HAR 与落盘流量文件使用脱敏视图；原生请求／响应页的“完整正文”模式、flows_body 和认证后的 /api/body 显式读取未脱敏正文。分页输出不拆分 UTF-8；压缩解码具有独立 8 MiB 预算。原始请求的有限保留也为明确授权的重放提供依据。
 
 控制操作可以修改采集配置或规则，查询操作读取内存快照。调用方通过同一 `Service` 进入业务校验，避免桌面、MCP 与 HTTP API 的行为分叉。暂停采集只停止记录；转发和已开启规则继续按配置执行。
 
@@ -35,7 +35,7 @@ flowchart TD
 | `cmd/netlens` | 参数、信号、进程生命周期 | 只组装本地运行配置 |
 | `internal/app` | Service、权限校验、API、listener | 业务权限不能只依赖 MCP annotations |
 | `internal/proxy` | HTTP 转发、CONNECT、TLS MITM、规则、重放与时间观测 | 验证上游 TLS；防止代理回环；不解析非 HTTP 应用协议 |
-| `internal/capture` | 有界记录、查询、统计、脱敏、HAR 和轮转日志 | 原始内部结构不直接成为外部响应 |
+| `internal/capture` | 有界记录、查询、统计、脱敏、HAR 和轮转日志 | 常规输出脱敏，完整正文通过独立分页视图读取 |
 | `internal/systemproxy` / `internal/wincert` | 用户代理备份／恢复、精确证书信任管理 | 桌面显式确认，不向 MCP 开放系统操作 |
 | `internal/model` | Flow、Body、Timings、Filter、Rule | 把采集限制、完成状态和关联 ID 显式表达 |
 | `internal/mcpserver` | SDK、工具 schema、传输、结构化结果和错误 | SDK 处理协议，Service 执行实际操作限制 |

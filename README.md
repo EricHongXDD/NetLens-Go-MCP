@@ -2,7 +2,7 @@
 
 NetLens 是一个 Go 实现的本地调试代理：应用把 HTTP(S) 请求发给代理后，人可以在 Windows 原生桌面窗口查看流量，大模型可以通过 MCP 配置采集范围、查找异常请求、读取脱敏详情、比较请求、导出 HAR，并在明确开启相关能力后执行请求重放、Header 修改、延迟注入和 Mock。
 
-当前交付是 **v0.4.0 原生 Windows 桌面软件**。重点是 Fiddler 一类的 HTTP 应用层排查流程。Wireshark 的网卡抓包、PCAP 分析、TCP 重传分析等能力列入后续扩展，当前没有实现。程序不内置大模型或 API Key；由你选用的 MCP 客户端连接模型，模型再调用 NetLens。
+当前交付是 **v0.4.1 原生 Windows 桌面软件**。重点是 Fiddler 一类的 HTTP 应用层排查流程。Wireshark 的网卡抓包、PCAP 分析、TCP 重传分析等能力列入后续扩展，当前没有实现。程序不内置大模型或 API Key；由你选用的 MCP 客户端连接模型，模型再调用 NetLens。
 
 **Windows 用户**：可使用自动构建的 `NetLens-版本-windows-amd64-setup.exe` 安装包，安装后从开始菜单打开 NetLens，直接打开中文原生窗口，不使用浏览器或 WebView。安装、MCP 配置和 GitHub 自动发布说明见 [Windows 使用指南](docs/windows.md)。GitHub Actions 在每次推送时生成安装包，推送 `vMAJOR.MINOR.PATCH` 标签时自动发布到 Releases。
 
@@ -251,7 +251,7 @@ MCP 客户端必须能访问 NetLens 所在环境。`127.0.0.1` 指客户端所�
 
 MCP 初始化、协议版本协商、工具目录、参数 schema 和工具返回值由官方 SDK 实现。传输机制见 [MCP 官方规范](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)。HTTP 入口还检查 Bearer token、Host 和 Origin。
 
-## 5. 大模型可以调用的 11 个工具
+## 5. 大模型可以调用的 12 个工具
 
 | 工具 | 作用 | 关键参数与限制 |
 |---|---|---|
@@ -259,6 +259,7 @@ MCP 初始化、协议版本协商、工具目录、参数 schema 和工具返�
 | `capture_configure` | 启停记录、替换采集过滤器 | `enabled` 和／或 `filter`；`filter:{}` 清除过滤条件 |
 | `flows_list` | 查询脱敏摘要，按最新顺序分页 | 筛选字段位于参数顶层；默认 `limit=50`，最大 200 |
 | `flows_get` | 获取一条脱敏请求、响应和时间证据 | `id`；默认 `body_limit=8192`，最大 65536 |
+| `flows_body` | 分页读取未脱敏完整正文，支持 HTML、纯文本、错标 JSON 与 gzip/deflate | `id`、`side`（默认 response）、`offset`、`limit`（默认 16384，最大 32768）；跟随 `next_offset` 直到 `has_more=false` |
 | `flows_stats` | 计算当前保留样本的状态分布、错误和延迟分位数 | 筛选字段位于参数顶层；慢请求用 `flows_list.min_duration_ms` 查 |
 | `flows_compare` | 比较两条请求的可见字段与耗时差异 | `left_id`、`right_id`；每个正文最多比较 8192 字节的脱敏视图 |
 | `flows_export_har` | 返回脱敏 HAR 对象 | `filter`、`limit`、`body_limit`；默认 20 条／每正文 2048 字节，最大 100 条 |
@@ -266,6 +267,8 @@ MCP 初始化、协议版本协商、工具目录、参数 schema 和工具返�
 | `rules_list` | 查看当前规则的脱敏配置 | `{}` |
 | `rules_replace` | 原子替换全部规则 | 需 `--allow-rules`；`rules:[]` 移除全部规则；最多 32 条 |
 | `requests_replay` | 从保留的请求发起一次真实的同源重放 | 需 `--allow-replay` 和 `confirm:true`；输入完整性检查仍会执行 |
+
+HTTP 200 只说明 HTTP 层成功，业务是否成功需读取正文中的错误码和消息。`flows_get` 会严格识别错标为 `text/html`／`text/plain` 的完整 JSON 对象或数组，并沿用脱敏流程。真正的 HTML、纯文本、JSON 标量和不完整内容可用 `flows_body` 原样读取；每页返回正文与 `redaction:none`、`capture_truncated`、`next_offset`、`has_more`。UTF-8 文本不拆分字符，二进制以 Base64 无损分页；gzip/deflate 自动解压，解压展示最多 8 MiB，超出时可通过桌面导出原始压缩字节。已截断、淘汰或仅有加密 CONNECT 隧道的记录不能恢复缺失正文，需要重新采集。默认每正文采集上限从 64 KiB 提高为 1 MiB，内存总预算仍为 64 MiB。
 
 一次工具结果最多 256 KiB。超出时需要减小 `limit`、`body_limit`，先查摘要再逐条读取详情。`flows_get` 的 `body_limit` 只改变已经采集数据的展示量，不能恢复采集时被截断的正文。
 
@@ -415,8 +418,8 @@ TTFB 不能直接等同于服务端纯业务处理时间；DNS、连接与 TLS �
 | 记录状态 | 开启 | MCP `capture_configure` 或 UI |
 | 保留请求数 | 1000 | `--max-flows` |
 | 保留数据预算 | 64 MiB | `--max-memory`，单位字节 |
-| 单个请求正文采集上限 | 64 KiB | `--body-limit`，1024–1048576 字节 |
-| 单个响应正文采集上限 | 64 KiB | 同一 `--body-limit` |
+| 单个请求正文采集上限 | 1 MiB | `--body-limit`，1024–1048576 字节 |
+| 单个响应正文采集上限 | 1 MiB | 同一 `--body-limit` |
 | 请求或 CONNECT 隧道超时 | 60 s | `--timeout`，1 s–10 min；也约束 SSE 生命周期 |
 | JSONL 持久化 | 关闭 | `--persist` |
 | JSONL 单文件轮转阈值 | 10 MiB | `--log-max-bytes` |
@@ -425,9 +428,11 @@ TTFB 不能直接等同于服务端纯业务处理时间；DNS、连接与 TLS �
 
 内存预算针对保留记录的保守估算，包含正文、Header 和记录结构；它不是进程 RSS 上限。活动请求、Go 运行时、连接和证书缓存等还会占用内存。
 
-原始请求／响应内容仅用于进程内部转发、保留和授权重放。原生窗口、HTTP API、MCP、HAR 和 JSONL 使用脱敏视图，没有公开原始流量下载接口。常见认证 Header、Cookie、API Key、token、签名，以及 JSON／表单中匹配敏感字段名的值会被隐藏。任意业务字段里未标注的秘密、URL 路径中嵌入的秘密等不保证被识别；生产使用前应按接口补充字段规则。
+原生窗口的请求／响应页默认显示完整未脱敏正文，关闭“完整正文”开关可返回脱敏预览。点击“导出正文”保存当前请求或响应的原始采集字节（保留服务器压缩及编码）；复制按钮复制当前请求／响应页。HTML 仅作为只读文本展示，不加载页面或执行脚本。MCP `flows_body` 与带令牌的 `GET /api/body?id=…&side=response&offset=0&limit=16384` 提供同一完整正文分页入口。JSON 页、常规详情、HAR 与 JSONL 始终脱敏。常见认证 Header、Cookie、API Key、token、签名，以及 JSON／表单中匹配敏感字段名的值会被隐藏。任意业务字段里未标注的秘密、URL 路径中嵌入的秘密等不保证被识别；生产使用前应按接口补充字段规则。
 
 正文只对**完整的 JSON 对象／数组和 URL 编码表单**提供结构化脱敏展示。未支持类型、二进制、缺失 Content-Type、无效／截断 JSON、采集不完整的正文被隐藏。代理关闭了 Go Transport 自动解压，带 gzip 等非 identity Content-Encoding 的正文在公开视图中隐藏，转发时保持其编码。`capture_truncated` 表示采集阶段不完整，`display_truncated` 表示完整数据脱敏后只展示了一部分。
+
+对于声明为 `text/html` 或 `text/plain`、但正文能严格解析为完整 JSON 对象／数组的接口，公开视图按 JSON 脱敏展示，并用 `content_type_mismatch:true` 和 `declared_content_type` 标记格式不一致。此处理只影响展示，不修改实际转发的 Header 或正文；普通 HTML、任意文本及 JSON 标量仍隐藏。
 
 启用持久化示例：
 

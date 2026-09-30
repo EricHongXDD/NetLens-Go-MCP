@@ -63,7 +63,7 @@ func (w *window) create() error {
 	next.AssignTo = &w.next
 	textPage := func(title string, target **walk.TextEdit) d.TabPage {
 		return d.TabPage{Title: title, Background: brush(bg), Layout: d.VBox{MarginsZero: true}, Children: []d.Widget{
-			d.TextEdit{AssignTo: target, Background: brush(panel), TextColor: ink, ReadOnly: true, VScroll: true, HScroll: false, MaxLength: 1 << 20, Font: d.Font{Family: "Consolas", PointSize: 10}},
+			d.TextEdit{AssignTo: target, Background: brush(panel), TextColor: ink, ReadOnly: true, VScroll: true, HScroll: false, MaxLength: 16 << 20, Font: d.Font{Family: "Consolas", PointSize: 10}},
 		}}
 	}
 	err := (d.MainWindow{
@@ -117,13 +117,13 @@ func (w *window) create() error {
 						}},
 						d.Composite{Name: "card", StretchFactor: 2, Background: brush(panel), Layout: d.VBox{Margins: d.Margins{Left: 12, Top: 12, Right: 12, Bottom: 12}, Spacing: 10}, Children: []d.Widget{
 							d.TabWidget{AssignTo: &w.tabs, Background: brush(panel), Pages: []d.TabPage{textPage("概览", &w.overview), textPage("请求", &w.request), textPage("响应", &w.response), textPage("JSON", &w.json), textPage("统计", &w.stats)}},
-							row(action("复制", "", w.copyDetail), action("设为基准", "", w.setBaseline), action("对比", "secondary", w.compare), action("重放", "danger", w.replaySelected)),
+							row(d.CheckBox{AssignTo: &w.fullBody, Text: "完整正文", Checked: true, OnCheckedChanged: w.selectFlow}, action("导出正文", "secondary", w.exportBody), action("复制", "", w.copyDetail), action("设为基准", "", w.setBaseline), action("对比", "secondary", w.compare), action("重放", "danger", w.replaySelected)),
 						}},
 					}},
 				}},
 			}},
 			d.Composite{Background: brush(panel), Layout: d.HBox{Margins: d.Margins{Left: 18, Top: 8, Right: 18, Bottom: 8}}, Children: []d.Widget{
-				d.Label{AssignTo: &w.notice, Text: "开启系统代理或配置应用代理后开始采集；请求和响应详情自动脱敏。", TextColor: muted, EllipsisMode: d.EllipsisEnd, StretchFactor: 1},
+				d.Label{AssignTo: &w.notice, Text: "请求／响应默认显示完整正文；关闭“完整正文”切换脱敏视图，JSON 与 HAR 始终脱敏。", TextColor: muted, EllipsisMode: d.EllipsisEnd, StretchFactor: 1},
 				d.Label{Text: "LOCAL ONLY  ·  " + model.Version, TextColor: cyan, Font: d.Font{Family: "Consolas", PointSize: 8}},
 			}},
 		},

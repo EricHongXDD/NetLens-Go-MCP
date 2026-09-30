@@ -156,8 +156,7 @@ func (s *Store) remove(item *entry) {
 	s.bytes -= item.bytes
 }
 
-// Get returns a deep-copied raw internal snapshot. External APIs must call
-// PublicFlow or PublicSummary before serializing any captured content.
+// Get 返回独立原始快照；常规接口使用脱敏视图，完整正文接口显式标记未脱敏。
 func (s *Store) Get(id string) (model.Flow, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

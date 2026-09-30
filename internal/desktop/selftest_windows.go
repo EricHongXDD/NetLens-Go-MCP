@@ -35,7 +35,7 @@ func isolatedProxyManager(dir string) *systemproxy.Manager {
 
 func writeTestResult(path string, testErr error) error {
 	result := map[string]any{"success": testErr == nil, "version": model.Version,
-		"checks": []string{"native_window", "native_layout", "styled_controls", "upstream_chain", "proxy_capture", "redacted_details", "native_filtering", "pause_resume", "har_export", "no_web_ui", "service_shutdown", "proxy_restore", "mcp_config", "ai_guide"}}
+		"checks": []string{"native_window", "native_layout", "styled_controls", "upstream_chain", "proxy_capture", "redacted_details", "full_body", "native_filtering", "pause_resume", "har_export", "no_web_ui", "service_shutdown", "proxy_restore", "mcp_config", "ai_guide"}}
 	if testErr != nil {
 		result["error"] = testErr.Error()
 	}
@@ -107,8 +107,8 @@ func (w *window) selfTest() error {
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 3 * time.Second}
 	origin := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
-		rw.Header().Set("Content-Type", "application/json")
-		io.WriteString(rw, `{"ok":true,"api_key":"desktop-fixture-secret"}`)
+		rw.Header().Set("Content-Type", "text/html")
+		io.WriteString(rw, `{"ok":false,"message":"业务错误完整正文","api_key":"desktop-fixture-secret","padding":"`+strings.Repeat("完整", 6000)+`","tail":"end-of-full-body"}`)
 	}))
 	defer origin.Close()
 	request := func(path string) error {
@@ -144,6 +144,11 @@ func (w *window) selfTest() error {
 		return errors.New("captured flow did not appear in native table")
 	}
 	w.table.SetCurrentIndex(0)
+	w.selectFlow()
+	if !w.fullBody.Checked() || !strings.Contains(w.response.Text(), "desktop-fixture-secret") || !strings.Contains(w.response.Text(), "end-of-full-body") || !strings.Contains(w.response.Text(), "业务错误完整正文") {
+		return errors.New("native full body lost mislabeled JSON, secret fields or text beyond the old preview limit")
+	}
+	w.fullBody.SetChecked(false)
 	w.selectFlow()
 	detail := w.json.Text() + w.request.Text() + w.response.Text()
 	if !strings.Contains(detail, "REDACTED") || strings.Contains(detail, "desktop-fixture-secret") {

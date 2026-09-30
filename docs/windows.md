@@ -38,7 +38,9 @@ HTTPS 解密需要在窗口勾选并重启服务，且测试客户端明确信�
 
 ## MCP 与命令行
 
-连接当前桌面实例时，点击 **复制 MCP 配置** 一键复制完整 JSON；也可查看 **连接与证书详情**。点击 **导出 AI 操作手册** 保存 UTF-8 Markdown，包含实际地址、令牌、当前权限、11 个工具和排查步骤。手册等同于访问凭据，默认文件名为 `NetLens-AI-Guide.private.md`，请只提供给授权本机客户端。API/MCP 共用窗口中的记录，控制端口不提供网页。
+请求／响应页默认开启 **完整正文**，直接显示全部保留的 HTML、文本或 JSON（未脱敏）。关闭开关返回脱敏预览；JSON 页始终脱敏。**复制**复制当前请求／响应页；**导出正文**保存当前页的原始采集字节，其他页默认导出响应。默认采集上限 1 MiB，已截断内容会显示提示；超过上限的原文无法事后恢复。MCP 通过 `flows_body` 分页读取，参数 `id`、`side:response`、`offset:0`、`limit:16384`，按 `next_offset` 继续直到 `has_more:false`。
+
+连接当前桌面实例时，点击 **复制 MCP 配置** 一键复制完整 JSON；也可查看 **连接与证书详情**。点击 **导出 AI 操作手册** 保存 UTF-8 Markdown，包含实际地址、令牌、当前权限、12 个工具和排查步骤。手册等同于访问凭据，默认文件名为 `NetLens-AI-Guide.private.md`，请只提供给授权本机客户端。API/MCP 共用窗口中的记录，控制端口不提供网页。
 
 stdio 使用独立的 `netlens-cli.exe`，参考安装目录的 `examples/mcp-windows.json`。替换模板中的用户和安装目录为实际绝对路径。stdio 客户端启动子进程前结束占用同一端口的桌面实例；客户端断开后子进程退出。
 
@@ -62,8 +64,8 @@ $desktop = Join-Path $env:LOCALAPPDATA 'Programs\NetLens\NetLens.exe'
 普通构建从 Actions 运行的 **Artifacts → NetLens-windows-amd64** 下载，保留 30 天。推送 `vMAJOR.MINOR.PATCH` 标签后，工作流将标签版本注入程序，并把安装包、便携 ZIP 和 SHA256 校验文件发布到 Releases。
 
 ```powershell
-git tag v0.4.0
-git push origin v0.4.0
+git tag v0.4.1
+git push origin v0.4.1
 ```
 
 ## 源码构建与打包
@@ -78,7 +80,7 @@ git push origin v0.4.0
 打包还需要 [Inno Setup](https://jrsoftware.org/isdl.php)：
 
 ```powershell
-./scripts/package-windows.ps1 -Version 0.4.0 -ISCC 'C:\实际路径\ISCC.exe'
+./scripts/package-windows.ps1 -Version 0.4.1 -ISCC 'C:\实际路径\ISCC.exe'
 ```
 
 构建脚本生成公共控件及 DPI manifest 资源并编译 GUI 程序。打包结果位于 `dist`，包含安装包、便携 ZIP 和 `SHA256SUMS.txt`。本地打包不安装软件；安装验收只在隔离 CI runner 中执行。

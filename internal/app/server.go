@@ -272,6 +272,20 @@ func (s *Service) api(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, s.Store.Query(q), nil)
+	case r.URL.Path == "/api/body" && r.Method == "GET":
+		in := BodyInput{ID: r.URL.Query().Get("id"), Side: r.URL.Query().Get("side")}
+		for name, target := range map[string]*int{"offset": &in.Offset, "limit": &in.Limit} {
+			if value := r.URL.Query().Get(name); value != "" {
+				n, err := strconv.Atoi(value)
+				if err != nil {
+					writeJSON(w, nil, fmt.Errorf("invalid %s", name))
+					return
+				}
+				*target = n
+			}
+		}
+		v, err := s.Body(in)
+		writeJSON(w, v, err)
 	case strings.HasPrefix(r.URL.Path, "/api/flows/") && r.Method == "GET":
 		limit := 8192
 		if x := r.URL.Query().Get("body_limit"); x != "" {
