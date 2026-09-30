@@ -17,13 +17,14 @@ var themeProc = syscall.NewCallback(themeWndProc)
 
 // 原生按钮采用公共控件自绘通知，保留键盘、焦点与可访问性行为。
 func applyTheme(root walk.Container) error {
-	surface, err := walk.NewSolidColorBrush(bg)
+	surface, err := walk.NewSolidColorBrush(panelRaised)
 	if err != nil {
 		return err
 	}
 	root.AsWindowBase().Disposing().Attach(func() { surface.Dispose() })
 	var visit func(walk.Window)
 	visit = func(window walk.Window) {
+		setupModernControl(window)
 		switch widget := window.(type) {
 		case *walk.PushButton:
 			themedButtons[widget.Handle()] = widget
@@ -36,7 +37,11 @@ func applyTheme(root walk.Container) error {
 			widget.SetBackground(surface)
 		case *walk.TextEdit:
 			widget.SetTextColor(ink)
-			widget.SetBackground(surface)
+			textSurface, e := walk.NewSolidColorBrush(panel)
+			if e == nil {
+				widget.SetBackground(textSurface)
+				widget.Disposing().Attach(textSurface.Dispose)
+			}
 		case *walk.Label:
 			if widget.TextColor() == 0 {
 				widget.SetTextColor(ink)
@@ -120,15 +125,18 @@ func drawButton(button *walk.PushButton, n *win.NMCUSTOMDRAW) {
 	fill, border, text := panelRaised, line, ink
 	switch button.Name() {
 	case "primary":
-		fill, border, text = walk.RGB(20, 50, 38), walk.RGB(45, 108, 84), green
+		fill, border, text = green, green, bg
 	case "secondary":
 		fill, border, text = walk.RGB(16, 44, 57), walk.RGB(43, 97, 117), cyan
 	case "danger":
 		text = danger
 	}
 	if n.UItemState&win.CDIS_HOT != 0 {
-		border = text
+		border = cyan
 		fill = walk.RGB(24, 43, 64)
+		if button.Name() == "primary" {
+			fill, border = walk.RGB(115, 237, 182), walk.RGB(115, 237, 182)
+		}
 	}
 	if n.UItemState&win.CDIS_SELECTED != 0 {
 		fill = bg
@@ -144,9 +152,12 @@ func drawButton(button *walk.PushButton, n *win.NMCUSTOMDRAW) {
 	defer win.DeleteObject(win.HGDIOBJ(pen))
 	saved := win.SaveDC(n.Hdc)
 	defer win.RestoreDC(n.Hdc, saved)
+	// 清除整个按钮区域，使圆角外侧与父面板衔接。
+	fillRect(n.Hdc, n.Rc, panel)
 	win.SelectObject(n.Hdc, win.HGDIOBJ(brush))
 	win.SelectObject(n.Hdc, win.HGDIOBJ(pen))
-	win.RoundRect(n.Hdc, n.Rc.Left+1, n.Rc.Top+1, n.Rc.Right-1, n.Rc.Bottom-1, 10, 10)
+	diameter := int32(20 * button.DPI() / 96)
+	win.RoundRect(n.Hdc, n.Rc.Left+1, n.Rc.Top+1, n.Rc.Right-1, n.Rc.Bottom-1, diameter, diameter)
 	win.SetBkMode(n.Hdc, win.TRANSPARENT)
 	win.SetTextColor(n.Hdc, win.COLORREF(text))
 	font := win.SendMessage(button.Handle(), win.WM_GETFONT, 0, 0)

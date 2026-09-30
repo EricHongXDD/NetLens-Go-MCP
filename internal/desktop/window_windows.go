@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -24,6 +25,7 @@ import (
 
 type window struct {
 	mw                 *walk.MainWindow
+	workspace          *walk.Composite
 	cfg                app.Config
 	runtime            *app.Runtime
 	settings           *walk.Composite
@@ -42,7 +44,7 @@ type window struct {
 	url                *walk.LineEdit
 	method             *walk.ComboBox
 	statusFilter       *walk.ComboBox
-	slow               *walk.NumberEdit
+	slow               *walk.LineEdit
 	errorsOnly         *walk.CheckBox
 	table              *walk.TableView
 	model              *flowModel
@@ -70,6 +72,7 @@ type window struct {
 	proxyManaged       bool
 	certStatus         *walk.Label
 	proxyStatus        *walk.Label
+	upstreamAddr       *walk.LineEdit
 	mcpAddress         *walk.Label
 	trafficSummary     *walk.Label
 	restoreProxyButton *walk.PushButton
@@ -109,7 +112,7 @@ func (m *flowModel) Value(row, col int) any {
 	return ""
 }
 
-func Run(cfg app.Config, testResult string) error {
+func Run(cfg app.Config, testResult string, viewport ...walk.Size) error {
 	w := &window{cfg: cfg, model: &flowModel{}, query: model.Query{Limit: 100}, done: make(chan struct{})}
 	if testResult == "" {
 		var err error
@@ -125,6 +128,9 @@ func Run(cfg app.Config, testResult string) error {
 		return err
 	}
 	defer w.mw.Dispose()
+	if testResult != "" && len(viewport) > 0 && viewport[0].Width > 0 && viewport[0].Height > 0 {
+		w.mw.SetSize(viewport[0])
+	}
 	w.mw.Closing().Attach(func(canceled *bool, _ walk.CloseReason) {
 		if err := w.restoreOnStop(); err != nil {
 			w.fail(err)
@@ -136,6 +142,9 @@ func Run(cfg app.Config, testResult string) error {
 			w.stopService()
 		}
 	})
+	if testResult != "" {
+		w.upstreamAddr.SetText("")
+	}
 	if err := w.startService(); err != nil {
 		if testResult != "" {
 			return writeTestResult(testResult, err)
@@ -166,6 +175,10 @@ func (w *window) startService() error {
 	if err != nil {
 		return fmt.Errorf("无法启动采集服务，请检查端口是否被占用或使用其他端口：%w", err)
 	}
+	if err := r.Service.Proxy.SetUpstream(w.upstreamAddr.Text()); err != nil {
+		r.Close()
+		return err
+	}
 	w.runtime = r
 	w.replayBusy = false
 	w.selectedID, w.baselineID, w.detail = "", "", nil
@@ -192,6 +205,7 @@ func (w *window) stopService() {
 		return
 	}
 	w.settings.SetEnabled(true)
+	w.upstreamAddr.SetEnabled(true)
 	w.serverButton.SetText("启动服务")
 	w.pauseButton.SetEnabled(false)
 	w.status.SetText("服务已停止")
@@ -285,7 +299,7 @@ func (w *window) selectFlow() {
 	index := w.table.CurrentIndex()
 	if index < 0 || index >= len(w.model.items) {
 		w.selectedID, w.detail = "", nil
-		w.overview.SetText("选择左侧流量，查看脱敏请求、响应和时间信息。\r\n\r\n暂无流量时，请检查待调试应用的代理配置。")
+		w.overview.SetText("选择上方流量，查看脱敏请求、响应和时间信息。\r\n\r\n暂无流量时，请检查待调试应用的代理配置。")
 		w.request.SetText("")
 		w.response.SetText("")
 		w.json.SetText("")
@@ -316,7 +330,11 @@ func (w *window) selectFlow() {
 }
 
 func (w *window) readFilter() (model.Filter, error) {
-	f := model.Filter{URLContains: strings.TrimSpace(w.url.Text()), MinDurationMS: w.slow.Value(), OnlyErrors: w.errorsOnly.Checked()}
+	duration, err := strconv.ParseFloat(strings.TrimSpace(w.slow.Text()), 64)
+	if err != nil || math.IsNaN(duration) || math.IsInf(duration, 0) || duration < 0 || duration > 600000 {
+		return model.Filter{}, fmt.Errorf("耗时请输入 0–600000 之间的毫秒数")
+	}
+	f := model.Filter{URLContains: strings.TrimSpace(w.url.Text()), MinDurationMS: duration, OnlyErrors: w.errorsOnly.Checked()}
 	for _, host := range strings.Split(w.hosts.Text(), ",") {
 		if host = strings.TrimSpace(host); host != "" {
 			f.Hosts = append(f.Hosts, host)
@@ -348,7 +366,7 @@ func (w *window) resetFilter() {
 	w.url.SetText("")
 	w.method.SetCurrentIndex(0)
 	w.statusFilter.SetCurrentIndex(0)
-	w.slow.SetValue(0)
+	w.slow.SetText("0")
 	w.errorsOnly.SetChecked(false)
 	w.applyFilter()
 }

@@ -6,7 +6,7 @@
 
 开始菜单的 **NetLens** 打开中文原生窗口；安装向导提供可选桌面快捷方式，并添加用户数据目录、指南及卸载入口。程序直接使用 Windows 控件，不使用浏览器或 WebView，也不显示控制台。
 
-窗口自动启动代理 `127.0.0.1:8080` 和 API/MCP 服务 `127.0.0.1:9090`。测试应用需要配置代理，流量表会自动刷新。选中请求可查看脱敏概览、请求、响应和 JSON；可以筛选、分页、暂停记录、导出 HAR、设置比较基准、比较请求。规则和重放需要先停止服务，在窗口勾选对应权限后重新启动。
+窗口自动启动代理 `127.0.0.1:8080` 和 API/MCP 服务 `127.0.0.1:9090`。桌面上游默认 `127.0.0.1:7890`；没有 Clash 或其他上游时清空“上游”后点击开启系统代理，或停止并重新启动服务应用直连设置。测试应用需要配置代理，流量表会自动刷新。选中请求可查看脱敏概览、请求、响应和 JSON；可以筛选、分页、暂停记录、导出 HAR、设置比较基准、比较请求。规则和重放需要先停止服务，在窗口勾选对应权限后重新启动。
 
 HTTPS 解密需要在窗口勾选并重启服务，且测试客户端明确信任 `%APPDATA%\NetLens\ca\ca.pem`。左侧“安装／检查／移除”按钮管理本实例 CA 的用户级信任；“开启系统代理”切换当前用户的 HTTP/HTTPS 代理，“恢复原代理”恢复开启前的手动代理、PAC、绕过列表和自动检测设置。关闭窗口或停止服务时自动恢复本窗口开启的代理；同一端口只能运行一个实例。
 
@@ -19,6 +19,22 @@ HTTPS 解密需要在窗口勾选并重启服务，且测试客户端明确信�
 - **移除证书**：只删除完整证书精确匹配的用户级信任；本地 CA 文件和其他根证书保留。机器级信任需管理员自行处理。
 - **开启系统代理**：必须先启动服务。暂时关闭 PAC 和自动检测，使用实际监听地址设置 HTTP/HTTPS 代理；本机地址默认绕过。只影响遵循 Windows Internet 设置的应用，不修改 WinHTTP、VPN 或环境变量。
 - **恢复原代理**：原配置先写入 `%APPDATA%\NetLens\system-proxy-backup.json` 后才切换。正常退出自动恢复；异常退出后重新打开软件，可手动恢复。恢复失败会保留备份。如果其他程序改变代理，自动恢复不会覆盖，手动恢复会要求确认。
+
+## 与 Clash / VPN 一起抓取
+
+“上游”默认 `127.0.0.1:7890`，支持 HTTP 代理地址及 Clash 的混合端口。网络路径为：
+
+```text
+应用 → NetLens 127.0.0.1:8080 → Clash 127.0.0.1:7890 → 网络
+```
+
+先运行 Clash 并保持节点／规则配置，再点击 NetLens 的 **开启系统代理**。NetLens 先检查上游端口可达，再切换 Windows 代理；失败时不切换系统代理，并恢复之前的上游路由。Clash 的进程、配置、节点、规则、7890 端口和 TUN 设置保持原状。HTTP、HTTPS 解密、CONNECT 隧道及请求重放均经过上游。
+
+开启期间 Windows 系统代理地址显示为 NetLens 的 8080，Clash 的 7890 继续作为上游。恢复或正常退出后还原开启前的 Windows 代理、PAC、自动检测和绕过设置。不要在抓取期间重新打开 Clash 的“系统代理”开关，否则 Clash 可能把 Windows 代理写回 7890，让应用直接绕过 NetLens。
+
+上游不可用时返回代理连接错误，不会自动绕过 VPN 直连。如果需要明确使用直连，将上游留空后重新开启。只配置了 7890 的独立应用需要改为 8080 才能被 NetLens 抓取；TUN、独立代理和非 HTTP(S) 流量不一定经过 Windows 系统代理。未开启 HTTPS 解密时，可记录 CONNECT 概要，正文仍保持加密。
+
+圆角侧栏完整显示主要操作，流量表和详情上下排列。窗口最小为 `1100×740`，会按可用工作区调整初始大小；滚动限定在流量和长文本详情中。
 
 ## MCP 与命令行
 
@@ -41,13 +57,13 @@ $desktop = Join-Path $env:LOCALAPPDATA 'Programs\NetLens\NetLens.exe'
 
 ## 自动构建与发布
 
-`.github/workflows/build.yml` 在分支推送、PR 和手动运行时执行 Linux/Windows 测试、Linux race、CLI 冒烟，然后构建并验证 Windows 原生安装包。Windows runner 实际安装，验证 GUI 子系统、开始菜单快捷方式、原生窗口功能、MCP 和代理，再卸载检查清理。
+`.github/workflows/build.yml` 在分支推送、PR 和手动运行时执行 Linux/Windows 测试、Linux race、CLI 冒烟，然后构建并验证 Windows 原生安装包。Windows runner 实际安装，验证 GUI 子系统、开始菜单快捷方式、原生窗口功能、最小窗口控件裁切、下拉框键盘选择、MCP 和代理，再卸载检查清理。
 
 普通构建从 Actions 运行的 **Artifacts → NetLens-windows-amd64** 下载，保留 30 天。推送 `vMAJOR.MINOR.PATCH` 标签后，工作流将标签版本注入程序，并把安装包、便携 ZIP 和 SHA256 校验文件发布到 Releases。
 
 ```powershell
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
 ## 源码构建与打包
@@ -62,7 +78,7 @@ git push origin v0.3.0
 打包还需要 [Inno Setup](https://jrsoftware.org/isdl.php)：
 
 ```powershell
-./scripts/package-windows.ps1 -Version 0.3.0 -ISCC 'C:\实际路径\ISCC.exe'
+./scripts/package-windows.ps1 -Version 0.4.0 -ISCC 'C:\实际路径\ISCC.exe'
 ```
 
 构建脚本生成公共控件及 DPI manifest 资源并编译 GUI 程序。打包结果位于 `dist`，包含安装包、便携 ZIP 和 `SHA256SUMS.txt`。本地打包不安装软件；安装验收只在隔离 CI runner 中执行。

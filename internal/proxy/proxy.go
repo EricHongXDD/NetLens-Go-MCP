@@ -46,6 +46,7 @@ type Proxy struct {
 	conns     map[net.Conn]struct{}
 	listeners []net.Addr
 	localIPs  []net.IP
+	upstream  atomic.Pointer[url.URL]
 }
 
 func New(opts Options) (*Proxy, error) {
@@ -87,7 +88,7 @@ func New(opts Options) (*Proxy, error) {
 		}
 	}
 	p.transport = &http.Transport{
-		Proxy:                  nil, // Never inherit HTTP_PROXY or HTTPS_PROXY.
+		Proxy:                  p.upstreamForRequest,
 		DialContext:            p.dialContext,
 		TLSClientConfig:        tlsConfig,
 		ForceAttemptHTTP2:      true,

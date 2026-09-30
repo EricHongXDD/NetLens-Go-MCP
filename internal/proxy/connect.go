@@ -63,7 +63,7 @@ func (p *Proxy) serveTunnel(w http.ResponseWriter, r *http.Request, authority st
 		flow.Timings = trace.snapshot()
 		p.publish(flow, cfg)
 	}()
-	upstream, err := p.dialContext(ctx, "tcp", authority)
+	upstream, err := p.dialTunnel(ctx, authority)
 	if err != nil {
 		flow.Error = "CONNECT upstream: " + err.Error()
 		http.Error(w, flow.Error, http.StatusBadGateway)
@@ -261,6 +261,14 @@ func (p *Proxy) serveMITM(w http.ResponseWriter, r *http.Request, authority stri
 type bufferedConn struct {
 	net.Conn
 	reader *bufio.Reader
+}
+
+// 串联隧道也要保留 TCP 半关闭，允许上传结束后继续读取响应。
+func (c *bufferedConn) CloseWrite() error {
+	if conn, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return conn.CloseWrite()
+	}
+	return nil
 }
 
 func (c *bufferedConn) Read(data []byte) (int, error) {

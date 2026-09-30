@@ -3,11 +3,13 @@
 package desktop
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/lxn/walk"
 	"netlens/internal/proxy"
@@ -52,7 +54,11 @@ func (w *window) refreshIntegration() {
 	}
 	w.restoreProxyButton.SetEnabled(state.HasBackup)
 	if state.Owned {
-		w.proxyStatus.SetText("系统代理 · NetLens 已开启")
+		if w.runtime != nil && w.runtime.Service.Proxy.Upstream() != "" {
+			w.proxyStatus.SetText("已开启 · 经上游代理联网")
+		} else {
+			w.proxyStatus.SetText("系统代理 · NetLens 已开启")
+		}
 	} else if state.HasBackup {
 		w.proxyStatus.SetText("存在恢复备份 · 当前代理已变更")
 	} else {
@@ -114,16 +120,43 @@ func (w *window) enableSystemProxy() {
 		return
 	}
 	address := w.runtime.Service.Status()["proxy_addr"].(string)
-	if walk.MsgBox(w.mw, "开启系统代理", "将当前用户的 Windows HTTP/HTTPS 代理设为 "+address+"，暂时关闭 PAC 和自动检测，并保存原配置。\r\n\r\n停止服务或关闭窗口时自动恢复。使用独立代理设置的应用可能不受影响，本机地址默认绕过。是否开启？", walk.MsgBoxYesNo|walk.MsgBoxIconQuestion) != walk.DlgCmdYes {
+	upstream := strings.TrimSpace(w.upstreamAddr.Text())
+	route := "直连网络"
+	if upstream != "" {
+		route = "经上游 " + upstream + " 联网，保留 Clash 的规则和节点选择"
+	}
+	if walk.MsgBox(w.mw, "开启系统代理", "流量路径：应用 → NetLens ("+address+") → "+route+"。\r\n\r\n原 Windows 代理配置会备份，停止服务或关闭窗口时恢复。使用独立代理设置或 TUN 的流量可能不经过系统代理。是否开启？", walk.MsgBoxYesNo|walk.MsgBoxIconQuestion) != walk.DlgCmdYes {
 		return
 	}
-	if err := w.systemProxy.Enable(address); err != nil {
+	if err := w.activateSystemProxy(upstream, address); err != nil {
 		w.fail(err)
 		return
 	}
 	w.proxyManaged = true
+	w.upstreamAddr.SetEnabled(false)
 	w.refreshIntegration()
-	w.notice.SetText("系统代理已开启，原代理、PAC 和自动检测设置已备份。正常退出时自动恢复。")
+	w.notice.SetText("系统代理已开启：应用 → NetLens → " + route + "。原配置已备份，退出自动恢复。")
+}
+
+// 先验证上游，再接管系统代理；失败时还原路由并保留原 Windows 设置。
+func (w *window) activateSystemProxy(upstream, address string) error {
+	p := w.runtime.Service.Proxy
+	previous := p.Upstream()
+	if err := p.SetUpstream(upstream); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	err := p.CheckUpstream(ctx)
+	cancel()
+	if err != nil {
+		p.SetUpstream(previous)
+		return fmt.Errorf("未开启系统代理，请先确认 Clash 正在监听上游端口：%w", err)
+	}
+	if err := w.systemProxy.Enable(address); err != nil {
+		p.SetUpstream(previous)
+		return err
+	}
+	return nil
 }
 
 func (w *window) restoreSystemProxy() {
@@ -142,6 +175,7 @@ func (w *window) restoreSystemProxy() {
 		return
 	}
 	w.proxyManaged = false
+	w.upstreamAddr.SetEnabled(true)
 	w.refreshIntegration()
 	w.notice.SetText("已恢复 NetLens 开启前的 Windows 系统代理配置。")
 }

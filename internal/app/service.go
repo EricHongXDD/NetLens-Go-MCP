@@ -123,6 +123,7 @@ func (s *Service) Status() map[string]any {
 	s.mu.RLock()
 	v := map[string]any{"version": model.Version, "proxy_addr": s.proxyAddr, "control_addr": s.controlAddr, "mitm": s.Config.MITM, "ca_cert_path": s.CA.CertPath(), "capture": clone(s.captureConfig), "allow_replay": s.Config.AllowReplay, "allow_rules": s.Config.AllowRules, "rules_count": len(s.rules), "body_limit": s.Config.BodyLimit, "request_timeout_seconds": s.Config.Timeout.Seconds(), "recent_actions": clone(s.audit)}
 	s.mu.RUnlock()
+	v["upstream_proxy"] = s.Proxy.Upstream()
 	v["storage"] = s.Store.Info()
 	v["capabilities"] = map[string]any{"application_layer_proxy": true, "packet_capture": false, "websocket_decode": false, "capture_pause_stops_forwarding": false, "upstream_tls_verified": true, "redacted_output": true}
 	return v

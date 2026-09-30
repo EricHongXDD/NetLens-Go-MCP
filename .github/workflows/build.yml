@@ -103,6 +103,11 @@ jobs:
         env:
           BUILD_VERSION: ${{ steps.version.outputs.value }}
         run: ./scripts/verify-windows-installer.ps1 -Installer "dist/NetLens-$env:BUILD_VERSION-windows-amd64-setup.exe" -Version $env:BUILD_VERSION
+      - name: Verify minimum window layout
+        shell: pwsh
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.value }}
+        run: ./scripts/verify-desktop.ps1 -Binary dist/windows-amd64/NetLens.exe -Version $env:BUILD_VERSION -DataDir "$env:RUNNER_TEMP/netlens-minimum-window" -Width 1100 -Height 740
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # 官方 v7
         with:
           name: NetLens-windows-amd64

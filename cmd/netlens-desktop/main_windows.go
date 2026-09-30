@@ -29,12 +29,14 @@ func main() {
 	flag.BoolVar(&cfg.AllowReplay, "allow-replay", false, "enable confirmed same-origin replay")
 	flag.BoolVar(&cfg.Persist, "persist", false, "persist redacted captures")
 	selfTest := flag.String("self-test-result", "", "run desktop integration test and write JSON result")
+	selfTestWidth := flag.Int("self-test-width", 0, "desktop self-test window width")
+	selfTestHeight := flag.Int("self-test-height", 0, "desktop self-test window height")
 	flag.Parse()
 	cfg.Token = os.Getenv("NETLENS_TOKEN")
 	if *selfTest != "" {
 		cfg.ProxyAddr, cfg.ControlAddr = "127.0.0.1:0", "127.0.0.1:0"
 	}
-	err := desktop.Run(cfg, *selfTest)
+	err := desktop.Run(cfg, *selfTest, walk.Size{Width: *selfTestWidth, Height: *selfTestHeight})
 	if err != nil {
 		if *selfTest == "" {
 			walk.MsgBox(nil, "NetLens 启动失败", fmt.Sprint(err), walk.MsgBoxIconError)

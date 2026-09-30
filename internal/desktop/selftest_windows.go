@@ -16,7 +16,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lxn/walk"
+	"github.com/lxn/win"
+
 	"netlens/internal/model"
+	"netlens/internal/proxy"
 	"netlens/internal/systemproxy"
 )
 
@@ -31,7 +35,7 @@ func isolatedProxyManager(dir string) *systemproxy.Manager {
 
 func writeTestResult(path string, testErr error) error {
 	result := map[string]any{"success": testErr == nil, "version": model.Version,
-		"checks": []string{"native_window", "proxy_capture", "redacted_details", "native_filtering", "pause_resume", "har_export", "no_web_ui", "service_shutdown", "proxy_restore", "mcp_config", "ai_guide"}}
+		"checks": []string{"native_window", "native_layout", "styled_controls", "upstream_chain", "proxy_capture", "redacted_details", "native_filtering", "pause_resume", "har_export", "no_web_ui", "service_shutdown", "proxy_restore", "mcp_config", "ai_guide"}}
 	if testErr != nil {
 		result["error"] = testErr.Error()
 	}
@@ -49,6 +53,9 @@ func (w *window) selfTest() error {
 	if w.mw.Handle() == 0 || w.table.Handle() == 0 || w.tabs.Pages().Len() != 5 || w.runtime == nil {
 		return errors.New("native controls or shared service were not created")
 	}
+	if err := w.verifyLayoutAndControls(); err != nil {
+		return err
+	}
 	// 验证新操作的恢复与导出逻辑，但不改变真实系统代理或信任存储。
 	proxyBefore, err := w.systemProxy.Status()
 	if err != nil {
@@ -58,7 +65,25 @@ func (w *window) selfTest() error {
 	status := s.Status()
 	proxyAddress := status["proxy_addr"].(string)
 	controlAddress := status["control_addr"].(string)
-	if err := w.systemProxy.Enable(proxyAddress); err != nil {
+	upstreamProxy, err := proxy.New(proxy.Options{})
+	if err != nil {
+		return err
+	}
+	defer upstreamProxy.Close()
+	upstream := httptest.NewServer(upstreamProxy)
+	upstreamProxy.SetListenAddr(upstream.Listener.Addr())
+	defer upstream.Close()
+	// 关闭的本地端口模拟 Clash 未启动，不得产生系统代理备份或修改路由。
+	unavailable := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	unavailableAddress := unavailable.URL
+	unavailable.Close()
+	if err := w.activateSystemProxy(unavailableAddress, proxyAddress); err == nil {
+		return errors.New("unavailable upstream accepted")
+	}
+	if state, err := w.systemProxy.Status(); err != nil || state.Current != proxyBefore.Current || state.HasBackup || s.Proxy.Upstream() != "" {
+		return errors.New("failed upstream check changed system proxy or routing")
+	}
+	if err := w.activateSystemProxy(upstream.URL, proxyAddress); err != nil {
 		return err
 	}
 	w.proxyManaged = true
@@ -184,5 +209,67 @@ func (w *window) selfTest() error {
 		}
 		listener.Close()
 	}
+	return nil
+}
+
+// 检查关键操作真实可见且未超出任何父控件，防止只通过消息循环却仍被裁切。
+func (w *window) verifyLayoutAndControls() error {
+	var visit func(walk.Window) error
+	visit = func(window walk.Window) error {
+		if !window.Visible() {
+			return nil
+		}
+		if _, ok := window.(walk.Widget); ok {
+			var rect win.RECT
+			win.GetWindowRect(window.Handle(), &rect)
+			if rect.Right > rect.Left && rect.Bottom > rect.Top {
+				for parent := win.GetParent(window.Handle()); parent != 0; parent = win.GetParent(parent) {
+					var bounds win.RECT
+					win.GetWindowRect(parent, &bounds)
+					if rect.Left < bounds.Left-1 || rect.Top < bounds.Top-1 || rect.Right > bounds.Right+1 || rect.Bottom > bounds.Bottom+1 {
+						return fmt.Errorf("control %T %q is clipped by %s: %v outside %v", window, window.Name(), windowClass(parent), rect, bounds)
+					}
+				}
+			}
+		}
+		if container, ok := window.(walk.Container); ok {
+			for i := 0; i < container.Children().Len(); i++ {
+				if err := visit(container.Children().At(i)); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := visit(w.mw); err != nil {
+		return err
+	}
+	// 原生键盘选择和开关操作必须继续工作，重绘不能替代真实控件语义。
+	w.method.SetCurrentIndex(0)
+	win.SendMessage(w.method.Handle(), win.WM_KEYDOWN, win.VK_DOWN, 0)
+	if w.method.CurrentIndex() != 1 {
+		return errors.New("dropdown keyboard navigation failed")
+	}
+	w.method.SetCurrentIndex(0)
+	before := w.auto.Checked()
+	win.SendMessage(w.auto.Handle(), win.BM_CLICK, 0, 0)
+	if w.auto.Checked() == before {
+		return errors.New("styled switch did not toggle")
+	}
+	w.auto.SetChecked(before)
+	w.tabs.SetCurrentIndex(1)
+	if w.tabs.CurrentIndex() != 1 || !w.request.Visible() {
+		return errors.New("styled detail tabs did not switch")
+	}
+	w.tabs.SetCurrentIndex(0)
+	w.slow.SetText("NaN")
+	if _, err := w.readFilter(); err == nil {
+		return errors.New("invalid duration accepted")
+	}
+	w.slow.SetText("100.5")
+	if filter, err := w.readFilter(); err != nil || filter.MinDurationMS != 100.5 {
+		return errors.New("duration filter failed")
+	}
+	w.slow.SetText("0")
 	return nil
 }

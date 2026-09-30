@@ -2,7 +2,9 @@
 param(
     [Parameter(Mandatory = $true)][string]$Binary,
     [Parameter(Mandatory = $true)][string]$Version,
-    [Parameter(Mandatory = $true)][string]$DataDir
+    [Parameter(Mandatory = $true)][string]$DataDir,
+    [int]$Width = 0,
+    [int]$Height = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,7 +21,9 @@ $dataPath = (Resolve-Path -LiteralPath $DataDir).Path
 $resultPath = Join-Path $dataPath 'desktop-result.json'
 if (Test-Path -LiteralPath $resultPath) { Remove-Item -LiteralPath $resultPath }
 # 自检会创建真实原生窗口，并在消息循环中操作同一套控件和采集引擎。
-$process = Start-Process -FilePath $binaryPath -ArgumentList @('--data-dir', "`"$dataPath`"", '--self-test-result', "`"$resultPath`"") -PassThru -WindowStyle Hidden
+$testArguments = @('--data-dir', "`"$dataPath`"", '--self-test-result', "`"$resultPath`"")
+if ($Width -gt 0 -and $Height -gt 0) { $testArguments += @('--self-test-width', $Width, '--self-test-height', $Height) }
+$process = Start-Process -FilePath $binaryPath -ArgumentList $testArguments -PassThru -WindowStyle Hidden
 if (-not $process.WaitForExit(60000)) {
     $process.Kill()
     throw 'Native desktop self-test timed out.'
@@ -27,7 +31,7 @@ if (-not $process.WaitForExit(60000)) {
 if ($process.ExitCode -ne 0) { throw "Native desktop failed with exit code $($process.ExitCode)" }
 $result = Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json
 if (-not $result.success -or $result.version -ne $Version) { throw 'Native desktop self-test result or version mismatch.' }
-foreach ($check in @('native_window', 'proxy_capture', 'redacted_details', 'native_filtering', 'pause_resume', 'har_export', 'no_web_ui', 'service_shutdown', 'proxy_restore', 'mcp_config', 'ai_guide')) {
+foreach ($check in @('native_window', 'native_layout', 'styled_controls', 'upstream_chain', 'proxy_capture', 'redacted_details', 'native_filtering', 'pause_resume', 'har_export', 'no_web_ui', 'service_shutdown', 'proxy_restore', 'mcp_config', 'ai_guide')) {
     if ($result.checks -notcontains $check) { throw "Missing native check: $check" }
 }
 Write-Output "Native desktop verified: $($result.checks -join ', ')"

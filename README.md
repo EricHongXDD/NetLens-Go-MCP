@@ -2,7 +2,7 @@
 
 NetLens 是一个 Go 实现的本地调试代理：应用把 HTTP(S) 请求发给代理后，人可以在 Windows 原生桌面窗口查看流量，大模型可以通过 MCP 配置采集范围、查找异常请求、读取脱敏详情、比较请求、导出 HAR，并在明确开启相关能力后执行请求重放、Header 修改、延迟注入和 Mock。
 
-当前交付是 **v0.3.0 原生 Windows 桌面软件**。重点是 Fiddler 一类的 HTTP 应用层排查流程。Wireshark 的网卡抓包、PCAP 分析、TCP 重传分析等能力列入后续扩展，当前没有实现。程序不内置大模型或 API Key；由你选用的 MCP 客户端连接模型，模型再调用 NetLens。
+当前交付是 **v0.4.0 原生 Windows 桌面软件**。重点是 Fiddler 一类的 HTTP 应用层排查流程。Wireshark 的网卡抓包、PCAP 分析、TCP 重传分析等能力列入后续扩展，当前没有实现。程序不内置大模型或 API Key；由你选用的 MCP 客户端连接模型，模型再调用 NetLens。
 
 **Windows 用户**：可使用自动构建的 `NetLens-版本-windows-amd64-setup.exe` 安装包，安装后从开始菜单打开 NetLens，直接打开中文原生窗口，不使用浏览器或 WebView。安装、MCP 配置和 GitHub 自动发布说明见 [Windows 使用指南](docs/windows.md)。GitHub Actions 在每次推送时生成安装包，推送 `vMAJOR.MINOR.PATCH` 标签时自动发布到 Releases。
 
@@ -17,7 +17,8 @@ NetLens 是一个 Go 实现的本地调试代理：应用把 HTTP(S) 请求发�
 | 时间信息 | DNS、连接、TLS 握手、首字节等待、总耗时，以及连接是否复用 |
 | 查询与筛选 | Host、Host 排除、方法、URL 子串、状态码范围、耗时下限、错误筛选、游标分页 |
 | 大模型入口 | 官方 MCP Go SDK；stdio 和 Streamable HTTP 两种传输 |
-| 人工入口 | Windows 原生桌面窗口，与 MCP、HTTP API 共用采集引擎 |
+| 人工入口 | 圆角深色原生桌面窗口，侧栏无全局滚动，与 MCP、HTTP API 共用采集引擎 |
+| Clash / VPN 串联 | 桌面上游默认 `127.0.0.1:7890`，HTTP、HTTPS 解密和 CONNECT 继续经过 Clash，保留其规则与节点 |
 | 排查操作 | 统计、慢请求、双请求对比、脱敏 HAR 导出 |
 | 主动调试 | 按启动权限开放同源重放、请求 Header 修改、延迟和 Mock |
 | 数据保留 | 有界内存；可选轮转脱敏 JSONL；默认不把原始流量写磁盘 |
@@ -28,6 +29,8 @@ NetLens 是一个 Go 实现的本地调试代理：应用把 HTTP(S) 请求发�
 
 安装后从开始菜单打开 **NetLens**，软件自动启动本地代理。窗口提供流量表、请求／响应详情、筛选、分页、暂停、HAR 导出、请求比较、规则和重放操作。关闭窗口会停止服务，并自动恢复本窗口开启前的系统代理。左侧提供本实例 CA 的安装／检查／移除、系统代理开启／恢复、MCP 配置一键复制及 AI 操作手册导出。
 
+桌面默认路径为 **应用 → NetLens `8080` → Clash `7890` → 网络**。先启动 Clash，再点击 NetLens 的“开启系统代理”；恢复或退出后还原原 Windows 代理。没有上游代理时，将“上游”清空后再开启；上游失效不会自动回退直连。
+
 从源码构建并启动原生窗口：
 
 ```powershell
@@ -35,7 +38,7 @@ NetLens 是一个 Go 实现的本地调试代理：应用把 HTTP(S) 请求发�
 ./bin/NetLens.exe
 ```
 
-停止服务后可在窗口勾选 HTTPS 解密、规则、重放或脱敏日志，再启动服务。MCP 客户端连接桌面实例时，点击窗口的 **MCP 连接** 获取 HTTP 配置；stdio 使用安装目录中的 `netlens-cli.exe`。两种实例使用相同端口时应只启动一个。
+停止服务后可在窗口勾选 HTTPS 解密、规则、重放或脱敏日志，再启动服务。MCP 客户端连接桌面实例时，点击窗口的 **复制 MCP 配置** 获取 HTTP 配置；stdio 使用安装目录中的 `netlens-cli.exe`。两种实例使用相同端口时应只启动一个。
 
 ## 2. 五分钟本地跑通
 
