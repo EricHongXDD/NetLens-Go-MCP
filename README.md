@@ -2,7 +2,7 @@
 
 NetLens 是一个 Go 实现的本地调试代理：应用把 HTTP(S) 请求发给代理后，人可以在 Windows 原生桌面窗口查看流量，大模型可以通过 MCP 配置采集范围、查找异常请求、读取脱敏详情、比较请求、导出 HAR，并在明确开启相关能力后执行请求重放、Header 修改、延迟注入和 Mock。
 
-当前交付是 **v0.4.1 原生 Windows 桌面软件**。重点是 Fiddler 一类的 HTTP 应用层排查流程。Wireshark 的网卡抓包、PCAP 分析、TCP 重传分析等能力列入后续扩展，当前没有实现。程序不内置大模型或 API Key；由你选用的 MCP 客户端连接模型，模型再调用 NetLens。
+当前交付是 **v0.4.2 原生 Windows 桌面软件**。重点是 Fiddler 一类的 HTTP 应用层排查流程。Wireshark 的网卡抓包、PCAP 分析、TCP 重传分析等能力列入后续扩展，当前没有实现。程序不内置大模型或 API Key；由你选用的 MCP 客户端连接模型，模型再调用 NetLens。
 
 **Windows 用户**：可使用自动构建的 `NetLens-版本-windows-amd64-setup.exe` 安装包，安装后从开始菜单打开 NetLens，直接打开中文原生窗口，不使用浏览器或 WebView。安装、MCP 配置和 GitHub 自动发布说明见 [Windows 使用指南](docs/windows.md)。GitHub Actions 在每次推送时生成安装包，推送 `vMAJOR.MINOR.PATCH` 标签时自动发布到 Releases。
 
@@ -12,7 +12,7 @@ NetLens 是一个 Go 实现的本地调试代理：应用把 HTTP(S) 请求发�
 |---|---|
 | HTTP 显式代理 | 客户端显式配置代理后，采集请求与响应；按流式方式转发 |
 | HTTPS 隧道 | 默认透传 CONNECT，记录隧道概要，TLS 正文保持加密 |
-| HTTPS 解密 | 启动时加 `--mitm`，并让测试客户端明确信任本实例 CA |
+| HTTPS 解密 | `--mitm` 默认仅解密采集 hosts；其他网站透传原始 TLS，测试客户端需信任本实例 CA |
 | 请求信息 | 方法、URL、Host、请求与响应 Header、状态码、正文预览、流量大小、完成状态 |
 | 时间信息 | DNS、连接、TLS 握手、首字节等待、总耗时，以及连接是否复用 |
 | 查询与筛选 | Host、Host 排除、方法、URL 子串、状态码范围、耗时下限、错误筛选、游标分页 |
@@ -144,7 +144,11 @@ curl --noproxy '*' -sS \
 
 ### 3.1 常规 HTTPS 调试
 
-先结束前一个 NetLens 进程，再加 `--mitm` 启动：
+默认采用目标主机解密：先结束前一个 NetLens 进程，再加 `--mitm` 启动；之后在窗口填写主机并点击“同时应用为采集条件”，或使用 MCP `capture_configure` 设置 `filter.hosts`。例如只解密 `app.melands.cn`、`img.melands.cn` 时，Bilibili 和其他站点通过原始 TLS 隧道继续经过 7890，保留浏览器的 TLS、HTTP/2、Cookie 和 WebSocket 行为。未设置 hosts 时 HTTPS 默认透传，避免不相关网站的登录和风控受全局解密影响。
+
+命令行显式 `--mitm --mitm-all` 可在无主机筛选时解密所有站点；`hosts:["*"]` 也表示明确选择全部主机。建议先限定实际调试目标。
+
+启动示例：
 
 ```bash
 ./bin/netlens serve --mitm --data-dir "$PWD/.netlens"
@@ -156,7 +160,7 @@ CA 证书位置为 `.netlens/ca/ca.pem`。也可单独创建或检查 CA：
 ./bin/netlens ca --data-dir "$PWD/.netlens"
 ```
 
-让单个 curl 命令信任这张 CA：
+先通过窗口或 MCP `capture_configure` 设置 `filter:{"hosts":["example.com"]}`，再让单个 curl 命令信任这张 CA：
 
 ```bash
 curl --noproxy "" --proxy http://127.0.0.1:8080 \
@@ -184,7 +188,7 @@ go run ./examples/demo-server \
 
 ```bash
 SSL_CERT_FILE="$PWD/.demo-tls/ca.pem" \
-  ./bin/netlens serve --mitm --data-dir "$PWD/.netlens"
+  ./bin/netlens serve --mitm --mitm-all --data-dir "$PWD/.netlens"
 ```
 
 终端 C：
@@ -420,7 +424,7 @@ TTFB 不能直接等同于服务端纯业务处理时间；DNS、连接与 TLS �
 | 保留数据预算 | 64 MiB | `--max-memory`，单位字节 |
 | 单个请求正文采集上限 | 1 MiB | `--body-limit`，1024–1048576 字节 |
 | 单个响应正文采集上限 | 1 MiB | 同一 `--body-limit` |
-| 请求或 CONNECT 隧道超时 | 60 s | `--timeout`，1 s–10 min；也约束 SSE 生命周期 |
+| 单个 HTTP 请求超时 | 60 s | `--timeout`，1 s–10 min；也约束解密后的 SSE。CONNECT 建连／握手有超时，已建立隧道不按单个请求时限断开 |
 | JSONL 持久化 | 关闭 | `--persist` |
 | JSONL 单文件轮转阈值 | 10 MiB | `--log-max-bytes` |
 | JSONL 备份数 | 3 | `--log-backups` |
@@ -473,7 +477,7 @@ API 使用同一组业务校验，因此不会绕过 MCP 工具的启动权限�
 | 现象 | 排查方向 |
 |---|---|
 | UI 没有请求 | 确认应用实际使用 `127.0.0.1:8080`，检查 `NO_PROXY`、应用独立代理配置、采集是否开启和 host 过滤条件 |
-| 只有 CONNECT 概要 | 当前为 HTTPS 隧道模式；启用 `--mitm` 并在测试客户端信任本实例 CA 后重新发起请求 |
+| 只有 CONNECT 概要 | 默认仅解密 capture.hosts；在窗口／MCP 明确设置目标主机，开启目标 HTTPS 并信任 CA 后重新发起请求；非目标网站按设计保持 TLS 透传 |
 | HTTPS 证书错误 | 区分客户端验证 NetLens 证书失败和 NetLens 验证真实上游失败；分别配置对应的可信 CA、域名与有效期 |
 | 看到 401 authentication required | 检查控制令牌、`Bearer ` 前缀和当前 `data-dir`；环境变量 token 优先于文件 |
 | HTTP MCP 连接失败 | 使用 `/mcp`、Streamable HTTP 和 Authorization Header；确认客户端能访问这台机器；自定义 Host／跨站 Origin 会被拒绝 |

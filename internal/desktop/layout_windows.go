@@ -84,7 +84,7 @@ func (w *window) create() error {
 						d.Composite{AssignTo: &w.settings, Layout: d.VBox{MarginsZero: true, Spacing: 7}, Children: []d.Widget{
 							row(caption("代理"), input(&w.proxyAddr, w.cfg.ProxyAddr, "127.0.0.1:8080", 1)),
 							row(caption("MCP"), input(&w.controlAddr, w.cfg.ControlAddr, "127.0.0.1:9090", 1)),
-							row(d.CheckBox{AssignTo: &w.mitm, Text: "HTTPS 解密", Checked: w.cfg.MITM}, d.CheckBox{AssignTo: &w.persist, Text: "脱敏日志", Checked: w.cfg.Persist}),
+							row(d.CheckBox{AssignTo: &w.mitm, Text: "目标 HTTPS", Checked: w.cfg.MITM, ToolTipText: "仅解密采集主机。填写主机后点击“同时应用为采集条件”，或由 MCP 设置 hosts；其他网站透传原始 TLS。"}, d.CheckBox{AssignTo: &w.persist, Text: "脱敏日志", Checked: w.cfg.Persist}),
 							row(d.CheckBox{AssignTo: &w.rules, Text: "启用规则", Checked: w.cfg.AllowRules}, d.CheckBox{AssignTo: &w.replay, Text: "启用重放", Checked: w.cfg.AllowReplay}),
 						}}, row(start, pause)),
 					card("系统代理", d.Label{AssignTo: &w.proxyStatus, Text: "系统代理 · 未接管", TextColor: muted},
@@ -132,6 +132,10 @@ func (w *window) create() error {
 		return err
 	}
 	w.fitWorkArea()
+	if w.cfg.MITMAllHosts {
+		w.mitm.SetText("全部 HTTPS")
+		w.mitm.SetToolTipText("已显式启用 --mitm-all：未筛选主机时解密所有 HTTPS，可能影响站点登录。")
+	}
 	return applyTheme(w.mw)
 }
 

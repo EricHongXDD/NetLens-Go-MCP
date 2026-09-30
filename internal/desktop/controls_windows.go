@@ -312,7 +312,11 @@ func paintNativeControl(hwnd win.HWND, dc win.HDC, c *paintedControl) {
 		}
 		text := ink
 		if !check.Enabled() {
-			fill, border, thumb = panelRaised, line, muted
+			if check.Checked() {
+				fill, border, thumb = walk.RGB(18, 50, 39), walk.RGB(30, 76, 55), walk.RGB(70, 166, 127)
+			} else {
+				fill, border, thumb = panelRaised, line, muted
+			}
 			text = muted
 		}
 		if win.GetFocus() == hwnd {

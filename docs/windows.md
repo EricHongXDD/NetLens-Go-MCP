@@ -8,7 +8,7 @@
 
 窗口自动启动代理 `127.0.0.1:8080` 和 API/MCP 服务 `127.0.0.1:9090`。桌面上游默认 `127.0.0.1:7890`；没有 Clash 或其他上游时清空“上游”后点击开启系统代理，或停止并重新启动服务应用直连设置。测试应用需要配置代理，流量表会自动刷新。选中请求可查看脱敏概览、请求、响应和 JSON；可以筛选、分页、暂停记录、导出 HAR、设置比较基准、比较请求。规则和重放需要先停止服务，在窗口勾选对应权限后重新启动。
 
-HTTPS 解密需要在窗口勾选并重启服务，且测试客户端明确信任 `%APPDATA%\NetLens\ca\ca.pem`。左侧“安装／检查／移除”按钮管理本实例 CA 的用户级信任；“开启系统代理”切换当前用户的 HTTP/HTTPS 代理，“恢复原代理”恢复开启前的手动代理、PAC、绕过列表和自动检测设置。关闭窗口或停止服务时自动恢复本窗口开启的代理；同一端口只能运行一个实例。
+目标 HTTPS 解密需要在窗口勾选并重启服务，再填写主机并点击“同时应用为采集条件”（或由 MCP 设置 filter.hosts）；未设置目标时 HTTPS 默认透传，非目标站点也不会被解密。测试客户端需明确信任 `%APPDATA%\NetLens\ca\ca.pem`。左侧“安装／检查／移除”按钮管理本实例 CA 的用户级信任；“开启系统代理”切换当前用户的 HTTP/HTTPS 代理，“恢复原代理”恢复开启前的手动代理、PAC、绕过列表和自动检测设置。关闭窗口或停止服务时自动恢复本窗口开启的代理；同一端口只能运行一个实例。
 
 用户数据默认位于 `%APPDATA%\NetLens`，包括令牌、CA 和可选脱敏日志。升级、卸载保留用户数据；重新安装复用令牌与 CA。
 
@@ -32,7 +32,7 @@ HTTPS 解密需要在窗口勾选并重启服务，且测试客户端明确信�
 
 开启期间 Windows 系统代理地址显示为 NetLens 的 8080，Clash 的 7890 继续作为上游。恢复或正常退出后还原开启前的 Windows 代理、PAC、自动检测和绕过设置。不要在抓取期间重新打开 Clash 的“系统代理”开关，否则 Clash 可能把 Windows 代理写回 7890，让应用直接绕过 NetLens。
 
-上游不可用时返回代理连接错误，不会自动绕过 VPN 直连。如果需要明确使用直连，将上游留空后重新开启。只配置了 7890 的独立应用需要改为 8080 才能被 NetLens 抓取；TUN、独立代理和非 HTTP(S) 流量不一定经过 Windows 系统代理。未开启 HTTPS 解密时，可记录 CONNECT 概要，正文仍保持加密。
+上游不可用时返回代理连接错误，不会自动绕过 VPN 直连。如果需要明确使用直连，将上游留空后重新开启。只配置了 7890 的独立应用需要改为 8080 才能被 NetLens 抓取；TUN、独立代理和非 HTTP(S) 流量不一定经过 Windows 系统代理。非目标 HTTPS 站点保留原始 TLS 证书、浏览器握手、HTTP/2 和 WebSocket，通过 7890 联网；只记录符合采集条件的 CONNECT 概要，正文仍保持加密。已建立隧道不会在 60 秒 HTTP 请求超时后被切断。缩小解密主机范围时，旧解密连接先完成当前响应，再关闭连接，让后续请求重新以原始 TLS 连接。全站 HTTPS 解密需要显式 --mitm --mitm-all，或 capture.hosts:["*"]。
 
 圆角侧栏完整显示主要操作，流量表和详情上下排列。窗口最小为 `1100×740`，会按可用工作区调整初始大小；滚动限定在流量和长文本详情中。
 
@@ -64,8 +64,8 @@ $desktop = Join-Path $env:LOCALAPPDATA 'Programs\NetLens\NetLens.exe'
 普通构建从 Actions 运行的 **Artifacts → NetLens-windows-amd64** 下载，保留 30 天。推送 `vMAJOR.MINOR.PATCH` 标签后，工作流将标签版本注入程序，并把安装包、便携 ZIP 和 SHA256 校验文件发布到 Releases。
 
 ```powershell
-git tag v0.4.1
-git push origin v0.4.1
+git tag v0.4.2
+git push origin v0.4.2
 ```
 
 ## 源码构建与打包
@@ -80,7 +80,7 @@ git push origin v0.4.1
 打包还需要 [Inno Setup](https://jrsoftware.org/isdl.php)：
 
 ```powershell
-./scripts/package-windows.ps1 -Version 0.4.1 -ISCC 'C:\实际路径\ISCC.exe'
+./scripts/package-windows.ps1 -Version 0.4.2 -ISCC 'C:\实际路径\ISCC.exe'
 ```
 
 构建脚本生成公共控件及 DPI manifest 资源并编译 GUI 程序。打包结果位于 `dist`，包含安装包、便携 ZIP 和 `SHA256SUMS.txt`。本地打包不安装软件；安装验收只在隔离 CI runner 中执行。

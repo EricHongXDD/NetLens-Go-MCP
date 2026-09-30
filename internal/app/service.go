@@ -22,20 +22,21 @@ import (
 )
 
 type Config struct {
-	ProxyAddr   string
-	ControlAddr string
-	DataDir     string
-	Token       string
-	MITM        bool
-	AllowReplay bool
-	AllowRules  bool
-	BodyLimit   int
-	MaxFlows    int
-	MaxBytes    int64
-	Persist     bool
-	LogMaxBytes int64
-	LogBackups  int
-	Timeout     time.Duration
+	ProxyAddr    string
+	ControlAddr  string
+	DataDir      string
+	Token        string
+	MITM         bool
+	MITMAllHosts bool
+	AllowReplay  bool
+	AllowRules   bool
+	BodyLimit    int
+	MaxFlows     int
+	MaxBytes     int64
+	Persist      bool
+	LogMaxBytes  int64
+	LogBackups   int
+	Timeout      time.Duration
 }
 
 func DefaultConfig() Config {
@@ -91,7 +92,7 @@ func New(cfg Config) (*Service, error) {
 		return nil, err
 	}
 	s := &Service{Config: cfg, Store: store, CA: ca, captureConfig: model.CaptureConfig{Enabled: true}, rules: []model.Rule{}, proxyAddr: cfg.ProxyAddr, controlAddr: cfg.ControlAddr, audit: []map[string]any{}}
-	p, err := proxy.New(proxy.Options{CA: ca, MITM: cfg.MITM, BodyLimit: cfg.BodyLimit, Timeout: cfg.Timeout, Record: store.Put, GetCapture: s.CaptureConfig, GetRules: s.Rules})
+	p, err := proxy.New(proxy.Options{CA: ca, MITM: cfg.MITM, MITMRequireHosts: !cfg.MITMAllHosts, BodyLimit: cfg.BodyLimit, Timeout: cfg.Timeout, Record: store.Put, GetCapture: s.CaptureConfig, GetRules: s.Rules})
 	if err != nil {
 		store.Close()
 		return nil, err
@@ -124,6 +125,11 @@ func (s *Service) Status() map[string]any {
 	v := map[string]any{"version": model.Version, "proxy_addr": s.proxyAddr, "control_addr": s.controlAddr, "mitm": s.Config.MITM, "ca_cert_path": s.CA.CertPath(), "capture": clone(s.captureConfig), "allow_replay": s.Config.AllowReplay, "allow_rules": s.Config.AllowRules, "rules_count": len(s.rules), "body_limit": s.Config.BodyLimit, "request_timeout_seconds": s.Config.Timeout.Seconds(), "recent_actions": clone(s.audit)}
 	s.mu.RUnlock()
 	v["upstream_proxy"] = s.Proxy.Upstream()
+	v["mitm_scope"] = "capture_hosts"
+	v["mitm_target_hosts"] = append([]string{}, s.CaptureConfig().Filter.Hosts...)
+	if s.Config.MITMAllHosts {
+		v["mitm_scope"] = "all_hosts_when_unfiltered"
+	}
 	v["storage"] = s.Store.Info()
 	v["capabilities"] = map[string]any{"application_layer_proxy": true, "packet_capture": false, "websocket_decode": false, "capture_pause_stops_forwarding": false, "upstream_tls_verified": true, "redacted_output": true, "full_body_read": true}
 	return v
@@ -160,6 +166,7 @@ func (s *Service) Configure(in CaptureInput) (any, error) {
 		s.captureConfig.Filter = clone(*in.Filter)
 	}
 	s.mu.Unlock()
+	s.Proxy.RefreshMITMScope()
 	s.recordAction("capture_configure", map[string]any{"enabled": s.CaptureConfig().Enabled})
 	return s.Status(), nil
 }
@@ -527,7 +534,7 @@ func (s *Service) Tools() []mcpserver.Tool {
 	replay := object(map[string]any{"url": str("Optional same-origin replacement URL"), "method": str("Replacement HTTP method"), "set_headers": headerSchema(), "remove_headers": stringsSchema(), "body": str("Complete replacement request body")})
 	return []mcpserver.Tool{
 		{Name: "capture_status", Description: "Show capture state, listen addresses, TLS mode, limits and recent control actions.", InputSchema: empty, ReadOnly: true, Handler: toolHandler(func(_ context.Context, _ struct{}) (any, error) { return s.Status(), nil })},
-		{Name: "capture_configure", Description: "Start/pause recording and replace the capture filter. Pausing recording does not stop proxy forwarding. Passing filter:{} clears filters.", InputSchema: object(map[string]any{"enabled": boolean(), "filter": filterSchema}), Handler: toolHandler(func(_ context.Context, in CaptureInput) (any, error) { return s.Configure(in) })},
+		{Name: "capture_configure", Description: "Start/pause recording and replace the capture filter. Pausing recording does not stop forwarding. hosts also selects HTTPS decryption targets; other sites keep original TLS tunnels. filter:{} clears filters and defaults HTTPS to passthrough unless startup --mitm-all was explicitly selected. Shrinking hosts finishes active responses before closing old intercepted connections.", InputSchema: object(map[string]any{"enabled": boolean(), "filter": filterSchema}), Handler: toolHandler(func(_ context.Context, in CaptureInput) (any, error) { return s.Configure(in) })},
 		{Name: "flows_list", Description: "Search redacted flow summaries, newest first. Use next_before_sequence as before_sequence for pagination. Bodies are not included.", InputSchema: object(qp), ReadOnly: true, Handler: toolHandler(func(_ context.Context, in model.Query) (any, error) {
 			q, err := normalizeQuery(in)
 			if err != nil {

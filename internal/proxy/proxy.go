@@ -28,6 +28,7 @@ import (
 type Options struct {
 	CA                *CA
 	MITM              bool
+	MITMRequireHosts  bool
 	BodyLimit         int
 	Timeout           time.Duration
 	Record            func(model.Flow)
@@ -37,16 +38,17 @@ type Options struct {
 }
 
 type Proxy struct {
-	opts      Options
-	transport *http.Transport
-	rootCtx   context.Context
-	cancel    context.CancelFunc
-	mu        sync.Mutex
-	closed    bool
-	conns     map[net.Conn]struct{}
-	listeners []net.Addr
-	localIPs  []net.IP
-	upstream  atomic.Pointer[url.URL]
+	opts        Options
+	transport   *http.Transport
+	rootCtx     context.Context
+	cancel      context.CancelFunc
+	mu          sync.Mutex
+	closed      bool
+	conns       map[net.Conn]struct{}
+	listeners   []net.Addr
+	localIPs    []net.IP
+	upstream    atomic.Pointer[url.URL]
+	mitmServers map[*http.Server]string
 }
 
 func New(opts Options) (*Proxy, error) {
@@ -79,7 +81,7 @@ func New(opts Options) (*Proxy, error) {
 		}
 	}
 	rootCtx, cancel := context.WithCancel(context.Background())
-	p := &Proxy{opts: opts, rootCtx: rootCtx, cancel: cancel, conns: make(map[net.Conn]struct{})}
+	p := &Proxy{opts: opts, rootCtx: rootCtx, cancel: cancel, conns: make(map[net.Conn]struct{}), mitmServers: make(map[*http.Server]string)}
 	if addrs, err := net.InterfaceAddrs(); err == nil {
 		for _, a := range addrs {
 			if ip, _, err := net.ParseCIDR(a.String()); err == nil {
@@ -277,6 +279,10 @@ func (p *Proxy) forward(parent context.Context, in *http.Request, source, parent
 	req.URL = &u
 	req.RequestURI = ""
 	req.Host = req.URL.Host
+	// 保留客户端原本的同源 Host，包括是否省略默认端口，避免登录接口的主机校验变化。
+	if in.Host != "" && sameOrigin(req.URL, &url.URL{Scheme: req.URL.Scheme, Host: in.Host}) {
+		req.Host = in.Host
+	}
 	req.Close = false
 	// A transparent Transport retry must not open an uncaptured replacement
 	// body. Calls with a body can be retried explicitly by the tool caller.

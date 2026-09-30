@@ -55,7 +55,8 @@ func run() error {
 	fs.StringVar(&cfg.ProxyAddr, "proxy", cfg.ProxyAddr, "explicit proxy listen address (loopback only)")
 	fs.StringVar(&cfg.ControlAddr, "control", cfg.ControlAddr, "API and MCP HTTP listen address (loopback only)")
 	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "private runtime data directory; use an absolute path in MCP clients")
-	fs.BoolVar(&cfg.MITM, "mitm", false, "decrypt HTTPS for clients that explicitly trust the generated CA")
+	fs.BoolVar(&cfg.MITM, "mitm", false, "decrypt HTTPS for configured capture hosts; other sites use original TLS tunnels")
+	fs.BoolVar(&cfg.MITMAllHosts, "mitm-all", false, "with --mitm, also decrypt all hosts when no capture host filter is configured")
 	fs.BoolVar(&cfg.AllowReplay, "allow-replay", false, "allow explicit, confirmed same-origin request replays")
 	fs.BoolVar(&cfg.AllowRules, "allow-rules", false, "allow request rewriting, delay and mock rules")
 	fs.BoolVar(&cfg.Persist, "persist", false, "write redacted completed flows to rotating JSONL logs")
@@ -64,7 +65,7 @@ func run() error {
 	fs.Int64Var(&cfg.MaxBytes, "max-memory", cfg.MaxBytes, "maximum retained flow memory budget in bytes")
 	fs.Int64Var(&cfg.LogMaxBytes, "log-max-bytes", cfg.LogMaxBytes, "rotation threshold for redacted JSONL logs")
 	fs.IntVar(&cfg.LogBackups, "log-backups", cfg.LogBackups, "rotated JSONL backup count")
-	fs.DurationVar(&cfg.Timeout, "timeout", cfg.Timeout, "timeout per request or CONNECT tunnel; also bounds SSE lifetime")
+	fs.DurationVar(&cfg.Timeout, "timeout", cfg.Timeout, "timeout per HTTP request and tunnel establishment; established CONNECT tunnels stay open")
 	stdio := fs.Bool("stdio", command == "mcp", "also serve MCP over stdin/stdout; all logs go to stderr")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {

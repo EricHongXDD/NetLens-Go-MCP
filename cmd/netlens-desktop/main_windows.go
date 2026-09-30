@@ -25,6 +25,7 @@ func main() {
 	flag.StringVar(&cfg.ProxyAddr, "proxy", cfg.ProxyAddr, "loopback proxy address")
 	flag.StringVar(&cfg.ControlAddr, "control", cfg.ControlAddr, "loopback API/MCP address")
 	flag.BoolVar(&cfg.MITM, "mitm", false, "enable HTTPS decryption")
+	flag.BoolVar(&cfg.MITMAllHosts, "mitm-all", false, "with --mitm, decrypt all hosts when unfiltered")
 	flag.BoolVar(&cfg.AllowRules, "allow-rules", false, "enable rewrite/mock rules")
 	flag.BoolVar(&cfg.AllowReplay, "allow-replay", false, "enable confirmed same-origin replay")
 	flag.BoolVar(&cfg.Persist, "persist", false, "persist redacted captures")

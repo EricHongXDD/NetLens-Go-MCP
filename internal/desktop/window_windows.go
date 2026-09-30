@@ -391,6 +391,9 @@ func (w *window) applyCaptureFilter() {
 		return
 	}
 	w.notice.SetText("采集条件已更新，将只记录符合条件的后续流量；代理继续转发其他请求。")
+	if w.cfg.MITM && !w.cfg.MITMAllHosts {
+		w.notice.SetText("已更新采集目标；HTTPS 仅解密 hosts 匹配主机，其他网站保留原始 TLS 经上游联网。")
+	}
 	w.refresh()
 }
 
@@ -403,7 +406,7 @@ func (w *window) clearCaptureFilter() {
 		w.fail(err)
 		return
 	}
-	w.notice.SetText("已清除采集条件，将采集所有后续流量。")
+	w.notice.SetText("已清除采集条件；采集所有后续流量，HTTPS 默认透传并记录 CONNECT 概要。")
 }
 
 func (w *window) toggleCapture() {

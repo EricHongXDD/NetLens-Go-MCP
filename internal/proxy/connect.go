@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"netlens/internal/capture"
 	"netlens/internal/model"
 )
 
@@ -34,10 +35,47 @@ func (p *Proxy) serveConnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid CONNECT target: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if p.opts.MITM {
+	if p.shouldIntercept(authority, p.captureConfig().Filter) {
 		p.serveMITM(w, r, authority)
 	} else {
 		p.serveTunnel(w, r, authority)
+	}
+}
+
+// 仅按主机决定 TLS 解密范围，方法和路径只有解密后才可见，不能据此阻断 CONNECT。
+func (p *Proxy) shouldIntercept(authority string, filter model.Filter) bool {
+	if !p.opts.MITM {
+		return false
+	}
+	for _, pattern := range filter.ExcludeHosts {
+		if capture.MatchHost(authority, pattern) {
+			return false
+		}
+	}
+	if len(filter.Hosts) == 0 {
+		return !p.opts.MITMRequireHosts
+	}
+	for _, pattern := range filter.Hosts {
+		if capture.MatchHost(authority, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// 缩小解密范围时，让旧会话完成当前响应后关闭，后续连接改走原始 TLS 透传。
+func (p *Proxy) RefreshMITMScope() {
+	filter := p.captureConfig().Filter
+	p.mu.Lock()
+	servers := make(map[*http.Server]string, len(p.mitmServers))
+	for server, authority := range p.mitmServers {
+		servers[server] = authority
+	}
+	p.mu.Unlock()
+	for server, authority := range servers {
+		if !p.shouldIntercept(authority, filter) {
+			server.SetKeepAlivesEnabled(false)
+		}
 	}
 }
 
@@ -51,7 +89,8 @@ func connectFlow(r *http.Request, authority, source string) model.Flow {
 }
 
 func (p *Proxy) serveTunnel(w http.ResponseWriter, r *http.Request, authority string) {
-	ctx, cancel := p.requestContext(r.Context(), true)
+	// 已建立隧道的生命周期由客户端和服务关闭决定，不用单个 HTTP 请求超时强制切断。
+	ctx, cancel := p.requestContext(r.Context(), false)
 	defer cancel()
 	flow := connectFlow(r, authority, "tunnel")
 	trace := newTrace(flow.StartedAt)
@@ -93,10 +132,6 @@ func (p *Proxy) serveTunnel(w http.ResponseWriter, r *http.Request, authority st
 		_ = client.Close()
 	})
 	defer stop()
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = upstream.SetDeadline(deadline)
-		_ = client.SetDeadline(deadline)
-	}
 	if _, err = buffered.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n"); err == nil {
 		err = buffered.Flush()
 	}
@@ -245,13 +280,22 @@ func (p *Proxy) serveMITM(w http.ResponseWriter, r *http.Request, authority stri
 			u.Scheme = "https"
 			u.Host = authority
 			innerR.URL = &u
-			innerR.Host = authority
+			// Host 已通过同源校验，保留浏览器发送的原始形式。
 			flow, err := p.forward(innerR.Context(), innerR, "proxy", "", innerW)
 			if err != nil && flow.StatusCode != 0 {
 				panic(http.ErrAbortHandler)
 			}
 		}),
 	}
+	p.mu.Lock()
+	p.mitmServers[server] = authority
+	p.mu.Unlock()
+	defer func() {
+		p.mu.Lock()
+		delete(p.mitmServers, server)
+		p.mu.Unlock()
+	}()
+	p.RefreshMITMScope()
 	defer server.Close()
 	if err := server.Serve(listener); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
 		recordFailure(fmt.Errorf("serve intercepted HTTPS: %w", err))
