@@ -28,7 +28,7 @@ func main() {
 	flag.BoolVar(&cfg.MITMAllHosts, "mitm-all", false, "with --mitm, decrypt all hosts when unfiltered")
 	flag.BoolVar(&cfg.AllowRules, "allow-rules", false, "enable rewrite/mock rules")
 	flag.BoolVar(&cfg.AllowReplay, "allow-replay", false, "enable confirmed same-origin replay")
-	flag.BoolVar(&cfg.Persist, "persist", false, "persist redacted captures")
+	flag.BoolVar(&cfg.Persist, "persist", false, "persist original capture values")
 	selfTest := flag.String("self-test-result", "", "run desktop integration test and write JSON result")
 	selfTestWidth := flag.Int("self-test-width", 0, "desktop self-test window width")
 	selfTestHeight := flag.Int("self-test-height", 0, "desktop self-test window height")
