@@ -45,7 +45,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force bin | Out-Null
-          $binary = if ($IsWindows) { 'bin/netlens.exe' } else { 'bin/netlens' }
+          $binary = if ($IsWindows) { 'bin/netlens-cli.exe' } else { 'bin/netlens' }
           go build -trimpath -o $binary ./cmd/netlens
           if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
           python scripts/smoke.py $binary

@@ -53,7 +53,7 @@ func run() error {
 	cfg.DataDir = defaultDataDir()
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	fs.StringVar(&cfg.ProxyAddr, "proxy", cfg.ProxyAddr, "explicit proxy listen address (loopback only)")
-	fs.StringVar(&cfg.ControlAddr, "control", cfg.ControlAddr, "Web UI and MCP HTTP listen address (loopback only)")
+	fs.StringVar(&cfg.ControlAddr, "control", cfg.ControlAddr, "API and MCP HTTP listen address (loopback only)")
 	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "private runtime data directory; use an absolute path in MCP clients")
 	fs.BoolVar(&cfg.MITM, "mitm", false, "decrypt HTTPS for clients that explicitly trust the generated CA")
 	fs.BoolVar(&cfg.AllowReplay, "allow-replay", false, "allow explicit, confirmed same-origin request replays")
@@ -65,7 +65,6 @@ func run() error {
 	fs.Int64Var(&cfg.LogMaxBytes, "log-max-bytes", cfg.LogMaxBytes, "rotation threshold for redacted JSONL logs")
 	fs.IntVar(&cfg.LogBackups, "log-backups", cfg.LogBackups, "rotated JSONL backup count")
 	fs.DurationVar(&cfg.Timeout, "timeout", cfg.Timeout, "timeout per request or CONNECT tunnel; also bounds SSE lifetime")
-	fs.BoolVar(&cfg.OpenBrowser, "open", false, "open the Web UI and connect using an in-memory token")
 	stdio := fs.Bool("stdio", command == "mcp", "also serve MCP over stdin/stdout; all logs go to stderr")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -78,9 +77,6 @@ func run() error {
 	}
 	if command == "mcp" {
 		*stdio = true
-	}
-	if *stdio && cfg.OpenBrowser {
-		return fmt.Errorf("--open cannot be combined with MCP stdio mode")
 	}
 	cfg.Token = os.Getenv("NETLENS_TOKEN")
 	abs, err := filepath.Abs(cfg.DataDir)

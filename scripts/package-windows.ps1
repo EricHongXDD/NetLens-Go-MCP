@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version = '0.1.1',
+    [string]$Version = '0.2.0',
     [string]$ISCC
 )
 
@@ -34,8 +34,9 @@ try {
     $env:GOOS = 'windows'
     $env:GOARCH = 'amd64'
     $env:CGO_ENABLED = '0'
-    & go build -trimpath -ldflags "-s -w -X netlens/internal/model.Version=$Version" -o (Join-Path $stagingDir 'netlens.exe') ./cmd/netlens
+    & go build -trimpath -ldflags "-s -w -X netlens/internal/model.Version=$Version" -o (Join-Path $stagingDir 'netlens-cli.exe') ./cmd/netlens
     if ($LASTEXITCODE -ne 0) { throw 'Go build failed.' }
+    & (Join-Path $PSScriptRoot 'build-desktop.ps1') -Version $Version -Output (Join-Path $stagingDir 'NetLens.exe')
     Copy-Item -LiteralPath README.md, THIRD_PARTY_NOTICES.txt -Destination $stagingDir -Force
     Copy-Item -LiteralPath THIRD_PARTY_LICENSES -Destination $stagingDir -Recurse -Force
     New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir 'examples'), (Join-Path $stagingDir 'docs') | Out-Null

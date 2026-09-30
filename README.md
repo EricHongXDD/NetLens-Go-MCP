@@ -1,10 +1,10 @@
 # NetLens：可由大模型操作的 Go HTTP(S) 抓包工具
 
-NetLens 是一个 Go 实现的本地调试代理：应用把 HTTP(S) 请求发给代理后，人可以在 Web 页面查看流量，大模型可以通过 MCP 配置采集范围、查找异常请求、读取脱敏详情、比较请求、导出 HAR，并在明确开启相关能力后执行请求重放、Header 修改、延迟注入和 Mock。
+NetLens 是一个 Go 实现的本地调试代理：应用把 HTTP(S) 请求发给代理后，人可以在 Windows 原生桌面窗口查看流量，大模型可以通过 MCP 配置采集范围、查找异常请求、读取脱敏详情、比较请求、导出 HAR，并在明确开启相关能力后执行请求重放、Header 修改、延迟注入和 Mock。
 
-当前交付是 **v0.1.1 可运行 MVP**。重点是 Fiddler 一类的 HTTP 应用层排查流程。Wireshark 的网卡抓包、PCAP 分析、TCP 重传分析等能力列入后续扩展，当前没有实现。程序不内置大模型或 API Key；由你选用的 MCP 客户端连接模型，模型再调用 NetLens。
+当前交付是 **v0.2.0 原生 Windows 桌面软件**。重点是 Fiddler 一类的 HTTP 应用层排查流程。Wireshark 的网卡抓包、PCAP 分析、TCP 重传分析等能力列入后续扩展，当前没有实现。程序不内置大模型或 API Key；由你选用的 MCP 客户端连接模型，模型再调用 NetLens。
 
-**Windows 用户**：可使用自动构建的 `NetLens-版本-windows-amd64-setup.exe` 安装包，安装后从开始菜单打开 NetLens，浏览器会自动打开并连接 Web 界面。安装、MCP 配置和 GitHub 自动发布说明见 [Windows 使用指南](docs/windows.md)。GitHub Actions 在每次推送时生成安装包，推送 `vMAJOR.MINOR.PATCH` 标签时自动发布到 Releases。
+**Windows 用户**：可使用自动构建的 `NetLens-版本-windows-amd64-setup.exe` 安装包，安装后从开始菜单打开 NetLens，直接打开中文原生窗口，不使用浏览器或 WebView。安装、MCP 配置和 GitHub 自动发布说明见 [Windows 使用指南](docs/windows.md)。GitHub Actions 在每次推送时生成安装包，推送 `vMAJOR.MINOR.PATCH` 标签时自动发布到 Releases。
 
 ## 1. 已实现的能力
 
@@ -17,12 +17,25 @@ NetLens 是一个 Go 实现的本地调试代理：应用把 HTTP(S) 请求发�
 | 时间信息 | DNS、连接、TLS 握手、首字节等待、总耗时，以及连接是否复用 |
 | 查询与筛选 | Host、Host 排除、方法、URL 子串、状态码范围、耗时下限、错误筛选、游标分页 |
 | 大模型入口 | 官方 MCP Go SDK；stdio 和 Streamable HTTP 两种传输 |
-| 人工入口 | 内嵌 Web UI 与使用相同采集引擎的 HTTP API |
+| 人工入口 | Windows 原生桌面窗口，与 MCP、HTTP API 共用采集引擎 |
 | 排查操作 | 统计、慢请求、双请求对比、脱敏 HAR 导出 |
 | 主动调试 | 按启动权限开放同源重放、请求 Header 修改、延迟和 Mock |
 | 数据保留 | 有界内存；可选轮转脱敏 JSONL；默认不把原始流量写磁盘 |
 
 源码依赖 **Go 1.26 或更高版本**，固定使用 `github.com/modelcontextprotocol/go-sdk v1.8.0`。SDK 来自 [MCP 官方 Go 仓库](https://github.com/modelcontextprotocol/go-sdk)。代理核心使用 Go 标准库，不需要 libpcap，也不需要管理员权限。
+
+## Windows 桌面启动
+
+安装后从开始菜单打开 **NetLens**，软件自动启动本地代理。窗口提供流量表、请求／响应详情、筛选、分页、暂停、HAR 导出、请求比较、规则和重放操作。关闭窗口会停止服务。
+
+从源码构建并启动原生窗口：
+
+```powershell
+./scripts/build-desktop.ps1
+./bin/NetLens.exe
+```
+
+停止服务后可在窗口勾选 HTTPS 解密、规则、重放或脱敏日志，再启动服务。MCP 客户端连接桌面实例时，点击窗口的 **MCP 连接** 获取 HTTP 配置；stdio 使用安装目录中的 `netlens-cli.exe`。两种实例使用相同端口时应只启动一个。
 
 ## 2. 五分钟本地跑通
 
@@ -40,7 +53,7 @@ go build -trimpath -o ./bin/netlens ./cmd/netlens
 ./bin/netlens version
 ```
 
-也可以执行 `make build`。Windows 可把输出文件改为 `bin/netlens.exe`，并使用对应的路径和终端语法。Windows 默认用户数据目录是 `%APPDATA%\NetLens`；可通过 `--data-dir` 指定其他目录。
+也可以执行 `make build`。Windows 命令行可把输出文件改为 `bin/netlens-cli.exe`，并使用对应的路径和终端语法。Windows 默认用户数据目录是 `%APPDATA%\NetLens`；可通过 `--data-dir` 指定其他目录。
 
 ### 2.2 终端 A：运行本地测试服务
 
@@ -71,10 +84,10 @@ go run ./examples/demo-server
 | 用途 | 地址 |
 |---|---|
 | 测试应用使用的代理 | `http://127.0.0.1:8080` |
-| 人工查看页面 | `http://127.0.0.1:9090/` |
+| HTTP API | `http://127.0.0.1:9090/api/` |
 | MCP HTTP 端点 | `http://127.0.0.1:9090/mcp` |
 
-程序会创建 `.netlens/control.token`。在自己的终端读取它，把内容粘贴到 Web UI 的令牌输入框。UI 只在当前页面内存中保留令牌，刷新页面后需要重新输入。
+程序会创建 `.netlens/control.token`，供 HTTP API 和 MCP 客户端鉴权使用。桌面窗口直接调用采集引擎，无需输入令牌；控制端口不提供网页。
 
 ```bash
 cat .netlens/control.token
@@ -106,7 +119,7 @@ curl --noproxy "" --proxy http://127.0.0.1:8080 \
 
 本地地址经常出现在 `NO_PROXY` 中，因此示例使用 `--noproxy ""`，确保这几条测试请求经过 NetLens。应用只要实际使用了代理，流量就会自动采集，无需逐条手工触发采集命令。
 
-此时可在 UI 中查到正常请求、503 和慢请求；敏感字段应显示 `[REDACTED]`。SSE 内容继续按流转发给 curl，但目前公开正文视图不解析 `text/event-stream`，因此正文可能显示为隐藏。活动流的正文和最终耗时可能要到完成后才更新。
+Windows 桌面实例中可查到正常请求、503 和慢请求；敏感字段应显示 `[REDACTED]`。SSE 内容继续按流转发给 curl，但目前公开正文视图不解析 `text/event-stream`，因此正文可能显示为隐藏。活动流的正文和最终耗时可能要到完成后才更新。
 
 ### 2.5 用 HTTP API 做简单自检
 
@@ -205,7 +218,7 @@ demo 会重用 `--tls-dir` 中的现有证书；服务证书有效期为一个�
 }
 ```
 
-把二进制和数据目录都替换成**绝对路径**。不要依赖 MCP 客户端的当前工作目录。`netlens mcp` 与 `netlens serve --stdio` 都会在同一进程中启动代理、Web UI、HTTP MCP 和 stdio MCP；这些入口看到的是同一份内存流量。
+把二进制和数据目录都替换成**绝对路径**。不要依赖 MCP 客户端的当前工作目录。`netlens mcp` 与 `netlens serve --stdio` 都会在同一进程中启动代理、HTTP API、HTTP MCP 和 stdio MCP；这些入口看到的是同一份内存流量。
 
 因此，连接前应结束使用相同端口的另一个 `netlens serve`。如果希望连接已运行的实例，使用下面的 HTTP 方式。stdio 客户端断开会结束其启动的 NetLens 子进程。运行日志输出到 stderr，stdout 专用于 MCP 消息。
 
@@ -213,7 +226,7 @@ demo 会重用 `--tls-dir` 中的现有证书；服务证书有效期为一个�
 
 ### 4.2 方式 B：连接已有进程的 Streamable HTTP 端点
 
-先运行 `netlens serve`，参考 [examples/mcp-http.json](examples/mcp-http.json)：
+先运行桌面软件或 `netlens serve`，参考 [examples/mcp-http.json](examples/mcp-http.json)：
 
 ```json
 {
@@ -409,7 +422,7 @@ TTFB 不能直接等同于服务端纯业务处理时间；DNS、连接与 TLS �
 
 内存预算针对保留记录的保守估算，包含正文、Header 和记录结构；它不是进程 RSS 上限。活动请求、Go 运行时、连接和证书缓存等还会占用内存。
 
-原始请求／响应内容仅用于进程内部转发、保留和授权重放。Web UI、HTTP API、MCP、HAR 和 JSONL 使用脱敏视图，没有公开原始流量下载接口。常见认证 Header、Cookie、API Key、token、签名，以及 JSON／表单中匹配敏感字段名的值会被隐藏。任意业务字段里未标注的秘密、URL 路径中嵌入的秘密等不保证被识别；生产使用前应按接口补充字段规则。
+原始请求／响应内容仅用于进程内部转发、保留和授权重放。原生窗口、HTTP API、MCP、HAR 和 JSONL 使用脱敏视图，没有公开原始流量下载接口。常见认证 Header、Cookie、API Key、token、签名，以及 JSON／表单中匹配敏感字段名的值会被隐藏。任意业务字段里未标注的秘密、URL 路径中嵌入的秘密等不保证被识别；生产使用前应按接口补充字段规则。
 
 正文只对**完整的 JSON 对象／数组和 URL 编码表单**提供结构化脱敏展示。未支持类型、二进制、缺失 Content-Type、无效／截断 JSON、采集不完整的正文被隐藏。代理关闭了 Go Transport 自动解压，带 gzip 等非 identity Content-Encoding 的正文在公开视图中隐藏，转发时保持其编码。`capture_truncated` 表示采集阶段不完整，`display_truncated` 表示完整数据脱敏后只展示了一部分。
 

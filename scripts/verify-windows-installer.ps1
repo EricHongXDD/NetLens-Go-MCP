@@ -19,23 +19,27 @@ $process = Start-Process -FilePath (Resolve-Path -LiteralPath $Installer).Path -
 ) -Wait -PassThru -WindowStyle Hidden
 if ($process.ExitCode -ne 0) { throw "Installer failed with exit code $($process.ExitCode)" }
 try {
-    $binary = Join-Path $installDir 'netlens.exe'
+    $binary = Join-Path $installDir 'NetLens.exe'
+    $cli = Join-Path $installDir 'netlens-cli.exe'
     if (-not (Test-Path -LiteralPath $binary)) { throw 'Installed executable missing.' }
-    $actualVersion = & $binary version
+    $actualVersion = & $cli version
     if ($LASTEXITCODE -ne 0 -or $actualVersion -ne "NetLens $Version") { throw "Installed version mismatch: $actualVersion" }
     if (-not (Test-Path -LiteralPath $shortcut)) { throw 'Start Menu shortcut missing.' }
     $shell = New-Object -ComObject WScript.Shell
     $link = $shell.CreateShortcut($shortcut)
-    if ($link.TargetPath -ne $binary -or $link.Arguments -ne 'serve --open') { throw 'Start Menu shortcut target or arguments are incorrect.' }
-    & python (Join-Path $PSScriptRoot 'smoke.py') $binary
+    if ($link.TargetPath -ne $binary -or $link.Arguments -ne '') { throw 'Start Menu shortcut target or arguments are incorrect.' }
+    & (Join-Path $PSScriptRoot 'verify-desktop.ps1') -Binary $binary -Version $Version -DataDir (Join-Path $env:RUNNER_TEMP 'NetLens Native Test')
+    & python (Join-Path $PSScriptRoot 'smoke.py') $cli
     if ($LASTEXITCODE -ne 0) { throw 'Installed binary MCP/proxy smoke test failed.' }
-    Write-Output 'Installer, Start Menu shortcut, version and installed MCP/proxy verified.'
+    Write-Output 'Installer, native desktop, Start Menu shortcut, version and installed MCP/proxy verified.'
 } finally {
     $uninstaller = Join-Path $installDir 'unins000.exe'
     if (Test-Path -LiteralPath $uninstaller) {
         $result = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru -WindowStyle Hidden
         if ($result.ExitCode -ne 0) { throw 'Uninstaller failed.' }
         if (Test-Path -LiteralPath $shortcut) { throw 'Uninstaller left the Start Menu shortcut behind.' }
-        if (Test-Path -LiteralPath (Join-Path $installDir 'netlens.exe')) { throw 'Uninstaller left the executable behind.' }
+        foreach ($name in @('NetLens.exe', 'netlens-cli.exe')) {
+            if (Test-Path -LiteralPath (Join-Path $installDir $name)) { throw "Uninstaller left $name behind." }
+        }
     }
 }

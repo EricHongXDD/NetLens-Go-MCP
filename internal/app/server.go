@@ -4,8 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
-	"embed"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -23,9 +21,6 @@ import (
 
 	"netlens/internal/model"
 )
-
-//go:embed ui.html
-var webFiles embed.FS
 
 func validateListenAddr(addr string) error {
 	host, port, err := net.SplitHostPort(addr)
@@ -143,28 +138,6 @@ func (s *Service) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", s.requireToken(http.MaxBytesHandler(s.MCP.HTTPHandler(), 2<<20)))
 	mux.Handle("/api/", s.requireToken(http.HandlerFunc(s.api)))
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" || r.Method != "GET" {
-			http.NotFound(w, r)
-			return
-		}
-		html, err := webFiles.ReadFile("ui.html")
-		if err != nil {
-			http.Error(w, "UI unavailable", 500)
-			return
-		}
-		var b [18]byte
-		if _, err := rand.Read(b[:]); err != nil {
-			http.Error(w, "UI unavailable", 500)
-			return
-		}
-		nonce := base64.RawStdEncoding.EncodeToString(b[:])
-		page := strings.ReplaceAll(string(html), "<script>", "<script nonce=\""+nonce+"\">")
-		page = strings.ReplaceAll(page, "<style>", "<style nonce=\""+nonce+"\">")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+"'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = io.WriteString(w, page)
-	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -348,9 +321,8 @@ func (s *Service) api(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, nil, errors.New("confirm=true is required"))
 			return
 		}
-		n := s.Store.Clear()
-		s.recordAction("flows_clear", map[string]any{"removed": n})
-		writeJSON(w, map[string]any{"removed": n, "scope": "in-memory only"}, nil)
+		v, err := s.Clear(in.Confirm)
+		writeJSON(w, v, err)
 	case r.URL.Path == "/api/export/har" && r.Method == "GET":
 		q, err := parseQuery(r.URL.Query())
 		if err != nil {
@@ -367,70 +339,118 @@ func (s *Service) api(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Run starts both listeners; stdio mode shares their live engine and exits on client disconnect.
-func Run(ctx context.Context, cfg Config, stdio bool, logger *log.Logger) error {
+// Runtime 让桌面窗口和 MCP 共用同一个服务，并统一管理监听端口及退出过程。
+type Runtime struct {
+	Service *Service
+	ctx     context.Context
+	cancel  context.CancelFunc
+	done    chan struct{}
+	err     error
+}
+
+func (r *Runtime) Done() <-chan struct{} { return r.done }
+
+func (r *Runtime) Err() error {
+	select {
+	case <-r.done:
+		return r.err
+	default:
+		return nil
+	}
+}
+
+func (r *Runtime) Close() error {
+	r.cancel()
+	<-r.done
+	return r.err
+}
+
+// Start 在返回前完成端口绑定；调用者可立即使用返回的 Service 操作采集引擎。
+func Start(ctx context.Context, cfg Config, logger *log.Logger) (*Runtime, error) {
 	if logger == nil {
 		logger = log.New(os.Stderr, "netlens: ", log.LstdFlags)
 	}
 	token, tokenPath, err := EnsureToken(cfg.DataDir, cfg.Token)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	cfg.Token = token
 	s, err := New(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer s.Close()
 	pl, err := net.Listen("tcp", cfg.ProxyAddr)
 	if err != nil {
-		return fmt.Errorf("proxy listen: %w", err)
+		s.Close()
+		return nil, fmt.Errorf("proxy listen: %w", err)
 	}
 	cl, err := net.Listen("tcp", cfg.ControlAddr)
 	if err != nil {
 		pl.Close()
-		return fmt.Errorf("control listen: %w", err)
+		s.Close()
+		return nil, fmt.Errorf("control listen: %w", err)
 	}
 	s.mu.Lock()
 	s.proxyAddr = pl.Addr().String()
 	s.controlAddr = cl.Addr().String()
 	s.mu.Unlock()
 	s.Proxy.SetListenAddr(pl.Addr())
-	proxyServer := &http.Server{Handler: s.Proxy, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 64 << 10, ErrorLog: logger}
-	controlServer := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10, ErrorLog: logger}
 	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	errCh := make(chan error, 3)
+	baseContext := func(net.Listener) context.Context { return ctx }
+	proxyServer := &http.Server{Handler: s.Proxy, BaseContext: baseContext, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 64 << 10, ErrorLog: logger}
+	controlServer := &http.Server{Handler: s.Handler(), BaseContext: baseContext, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10, ErrorLog: logger}
+	r := &Runtime{Service: s, ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	errCh := make(chan error, 2)
 	go func() { errCh <- proxyServer.Serve(pl) }()
 	go func() { errCh <- controlServer.Serve(cl) }()
-	logger.Printf("proxy=http://%s UI=http://%s MCP=http://%s/mcp", pl.Addr(), cl.Addr(), cl.Addr())
+	logger.Printf("proxy=http://%s API=http://%s MCP=http://%s/mcp", pl.Addr(), cl.Addr(), cl.Addr())
 	logger.Printf("control credential: %s", tokenPath)
 	logger.Printf("MITM=%t CA certificate: %s; replay=%t rules=%t", cfg.MITM, s.CA.CertPath(), cfg.AllowReplay, cfg.AllowRules)
-	if cfg.OpenBrowser {
-		if err := openBrowser(browserURL(cl.Addr().String(), token)); err != nil {
-			// 浏览器失败不影响采集；日志中不输出包含令牌的启动地址。
-			logger.Printf("could not open browser; open http://%s/ and use the control credential file", cl.Addr())
-		}
-	}
-	if stdio {
-		go func() { errCh <- s.MCP.RunStdio(ctx) }()
-	}
-	select {
-	case <-ctx.Done():
-		err = nil
-	case err = <-errCh:
-		if errors.Is(err, http.ErrServerClosed) || errors.Is(err, context.Canceled) {
+	go func() {
+		select {
+		case <-ctx.Done():
 			err = nil
+		case err = <-errCh:
+			if errors.Is(err, http.ErrServerClosed) || errors.Is(err, context.Canceled) {
+				err = nil
+			}
 		}
+		cancel()
+		// 先关闭被劫持的 CONNECT 连接，再等待普通请求退出。
+		_ = s.Proxy.Close()
+		shutdownCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		_ = proxyServer.Shutdown(shutdownCtx)
+		_ = controlServer.Shutdown(shutdownCtx)
+		_ = proxyServer.Close()
+		_ = controlServer.Close()
+		_ = s.Close()
+		r.err = err
+		close(r.done)
+	}()
+	return r, nil
+}
+
+// Run 保留命令行和 stdio 入口；客户端断开时关闭共享服务。
+func Run(ctx context.Context, cfg Config, stdio bool, logger *log.Logger) error {
+	r, err := Start(ctx, cfg, logger)
+	if err != nil {
+		return err
 	}
-	cancel()
-	// Close hijacked CONNECT connections before waiting for normal HTTP handlers.
-	_ = s.Proxy.Close()
-	shutdownCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
-	defer stop()
-	_ = proxyServer.Shutdown(shutdownCtx)
-	_ = controlServer.Shutdown(shutdownCtx)
-	_ = proxyServer.Close()
-	_ = controlServer.Close()
-	return err
+	defer r.Close()
+	if !stdio {
+		<-r.Done()
+		return r.Err()
+	}
+	stdioErr := make(chan error, 1)
+	go func() { stdioErr <- r.Service.MCP.RunStdio(r.ctx) }()
+	select {
+	case <-r.Done():
+		return r.Err()
+	case err := <-stdioErr:
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return err
+	}
 }

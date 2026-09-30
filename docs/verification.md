@@ -1,3 +1,17 @@
+# 验证记录
+
+## v0.2.0 原生桌面软件
+
+- Windows 原生 Win32 控件，桌面二进制使用 Windows GUI 子系统并嵌入 DPI／公共控件 manifest。
+- 本地 `go test ./...`、`go vet ./...` 通过。
+- 原生消息循环自检覆盖窗口创建、真实代理抓包、详情脱敏、窗口筛选、暂停／恢复、HAR 导出、控制端口无网页、服务退出释放监听地址。
+- 安装包同时包含 `NetLens.exe` 与 `netlens-cli.exe`；开始菜单和桌面快捷方式打开原生窗口。
+- CI 在隔离 Windows runner 中安装、检查 GUI 子系统和快捷方式、运行已安装桌面自检及 CLI MCP／代理冒烟，再卸载并检查清理。Linux CI 运行 race 检测。
+
+## 历史版本记录
+
+以下内容描述原始版本的验证情况；v0.2.0 已删除 Web UI。
+
 # NetLens 验证记录
 
 ## v0.1.1 Windows 安装包

@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "netlens": {
-      "command": "C:\\Users\\YOUR_USER\\AppData\\Local\\Programs\\NetLens\\netlens.exe",
+      "command": "C:\\Users\\YOUR_USER\\AppData\\Local\\Programs\\NetLens\\netlens-cli.exe",
       "args": ["mcp", "--data-dir", "C:\\Users\\YOUR_USER\\AppData\\Roaming\\NetLens"]
     }
   }

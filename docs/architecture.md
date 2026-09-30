@@ -2,9 +2,9 @@
 
 ## 1. 目标与当前交付
 
-NetLens 将应用层流量记录与大模型控制连接到同一个本地服务。人通过 Web UI 查看证据，模型通过 MCP 查询、配置和执行受限制的调试操作。用户仍在自己的客户端或应用中设置 HTTP 代理；未经过该代理的流量不在本版采集范围内。
+NetLens 将应用层流量记录与大模型控制连接到同一个本地服务。人通过 Windows 原生桌面窗口 查看证据，模型通过 MCP 查询、配置和执行受限制的调试操作。用户仍在自己的客户端或应用中设置 HTTP 代理；未经过该代理的流量不在本版采集范围内。
 
-v0.1.0 交付包含 HTTP(S) 显式代理、有界内存、脱敏公开视图、HAR、可选 JSONL、MCP stdio／Streamable HTTP、Web UI、规则与重放。网卡抓包和协议层分析不包含在本版。当前会剥离 HTTP trailers，不支持完整 gRPC 语义，也不提供 gRPC message 解码。
+v0.2.0 交付包含 HTTP(S) 显式代理、有界内存、脱敏公开视图、HAR、可选 JSONL、MCP stdio／Streamable HTTP、Windows 原生桌面窗口、规则与重放。网卡抓包和协议层分析不包含在本版。当前会剥离 HTTP trailers，不支持完整 gRPC 语义，也不提供 gRPC message 解码。
 
 ## 2. 数据路径与控制路径
 
@@ -15,7 +15,7 @@ flowchart TD
     Proxy --> Store["有界内存记录"]
     Store --> View["脱敏视图"]
     View --> MCP["MCP 工具"]
-    View --> UI["Web UI 和 API"]
+    View --> UI["Windows 原生桌面窗口 和 API"]
     View --> Export["HAR 和可选 JSONL"]
     Model["模型与 MCP 客户端"] --> MCP
     MCP --> Control["配置与操作校验"]
@@ -25,14 +25,15 @@ flowchart TD
 
 代理使用流式转发，并在读取时只保留受 `body-limit` 限制的正文样本。原始内容只存在于进程内部；所有面向操作者、模型和落盘流量文件的输出经过统一脱敏。原始请求的有限保留也为明确授权的重放提供依据。
 
-控制操作可以修改采集配置或规则，查询操作读取内存快照。调用方通过同一 `Service` 进入业务校验，避免 MCP 与 HTTP API 的行为分叉。暂停采集只停止记录；转发和已开启规则继续按配置执行。
+控制操作可以修改采集配置或规则，查询操作读取内存快照。调用方通过同一 `Service` 进入业务校验，避免桌面、MCP 与 HTTP API 的行为分叉。暂停采集只停止记录；转发和已开启规则继续按配置执行。
 
 ## 3. 组件划分
 
 | 组件 | 职责 | 边界 |
 |---|---|---|
+| `cmd/netlens-desktop` / `internal/desktop` | Windows 原生控件、窗口消息循环、用户操作 | 直接调用脱敏 Service；不使用 HTTP 页面或 WebView |
 | `cmd/netlens` | 参数、信号、进程生命周期 | 只组装本地运行配置 |
-| `internal/app` | Service、权限校验、API、UI、listener | 业务权限不能只依赖 MCP annotations |
+| `internal/app` | Service、权限校验、API、listener | 业务权限不能只依赖 MCP annotations |
 | `internal/proxy` | HTTP 转发、CONNECT、TLS MITM、规则、重放与时间观测 | 验证上游 TLS；防止代理回环；不解析非 HTTP 应用协议 |
 | `internal/capture` | 有界记录、查询、统计、脱敏、HAR 和轮转日志 | 原始内部结构不直接成为外部响应 |
 | `internal/model` | Flow、Body、Timings、Filter、Rule | 把采集限制、完成状态和关联 ID 显式表达 |
@@ -40,16 +41,17 @@ flowchart TD
 
 MCP 使用 [官方 Go SDK](https://github.com/modelcontextprotocol/go-sdk)，固定版本为 v1.8.0。项目 Go 版本下限为 1.26。工具目录固定，HTTP transport 使用 stateless／JSON response；应用记录在 Service 内存中，不依赖单个 MCP 会话保存。
 
-## 4. 两种运行方式
+## 4. 运行方式
 
 | 方式 | 生命周期 | 共享关系 |
 |---|---|---|
-| `netlens serve` | 用户独立启动的常驻进程，收到结束信号退出 | UI、HTTP API 和 HTTP MCP 共用引擎 |
-| `netlens mcp` 或 `netlens serve --stdio` | MCP 客户端启动子进程，客户端断开后退出 | stdio、UI、HTTP API 和 HTTP MCP 共用这个子进程的引擎 |
+| `NetLens.exe` | 窗口管理服务生命周期，关闭窗口停止服务 | 原生窗口、HTTP API 和 HTTP MCP 共用引擎 |
+| `netlens serve` | 用户独立启动的常驻进程，收到结束信号退出 | HTTP API 和 HTTP MCP 共用引擎 |
+| `netlens mcp` 或 `netlens serve --stdio` | MCP 客户端启动子进程，客户端断开后退出 | stdio、HTTP API 和 HTTP MCP 共用这个子进程的引擎 |
 
 stdio 模式也会启动代理和控制 listener，因此不能与同端口的另一个进程同时使用。连接已有服务应选 HTTP 方式。多个 MCP 客户端连到同一个 HTTP 实例时会共享记录、过滤器和规则；本版没有每客户端隔离或多租户权限。
 
-默认仅监听 `127.0.0.1:8080` 和 `127.0.0.1:9090`。HTTP 控制操作验证 Bearer token，校验 Host 和同源 Origin，并设置页面 CSP。stdio 使用本地父子进程关系作为接入边界；服务日志写 stderr，stdout 只允许 MCP 帧。有关传输约束见 [MCP 官方规范](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)。
+默认仅监听 `127.0.0.1:8080` 和 `127.0.0.1:9090`。HTTP 控制操作验证 Bearer token，校验 Host 和同源 Origin，不提供网页。stdio 使用本地父子进程关系作为接入边界；服务日志写 stderr，stdout 只允许 MCP 帧。有关传输约束见 [MCP 官方规范](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)。
 
 ## 5. TLS 处理
 

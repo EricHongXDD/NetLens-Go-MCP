@@ -36,7 +36,6 @@ type Config struct {
 	LogMaxBytes int64
 	LogBackups  int
 	Timeout     time.Duration
-	OpenBrowser bool
 }
 
 func DefaultConfig() Config {
@@ -162,6 +161,16 @@ func (s *Service) Configure(in CaptureInput) (any, error) {
 	s.mu.Unlock()
 	s.recordAction("capture_configure", map[string]any{"enabled": s.CaptureConfig().Enabled})
 	return s.Status(), nil
+}
+
+// Clear 统一桌面、HTTP 和 MCP 的清空确认及审计行为。
+func (s *Service) Clear(confirm bool) (any, error) {
+	if !confirm {
+		return nil, errors.New("confirm=true is required")
+	}
+	n := s.Store.Clear()
+	s.recordAction("flows_clear", map[string]any{"removed": n})
+	return map[string]any{"removed": n, "scope": "in-memory only; JSONL logs are unchanged"}, nil
 }
 
 func normalizeQuery(q model.Query) (model.Query, error) {
@@ -537,12 +546,7 @@ func (s *Service) Tools() []mcpserver.Tool {
 		{Name: "flows_clear", Description: "Clear only the in-memory flow buffer. Existing rotated JSONL logs remain on disk. Requires confirm:true; in-flight captures can finish afterward.", InputSchema: object(map[string]any{"confirm": boolean()}, "confirm"), Destructive: true, Handler: toolHandler(func(_ context.Context, in struct {
 			Confirm bool `json:"confirm"`
 		}) (any, error) {
-			if !in.Confirm {
-				return nil, errors.New("confirm=true is required")
-			}
-			n := s.Store.Clear()
-			s.recordAction("flows_clear", map[string]any{"removed": n})
-			return map[string]any{"removed": n, "scope": "in-memory only; JSONL logs are unchanged"}, nil
+			return s.Clear(in.Confirm)
 		})},
 		{Name: "rules_list", Description: "List request rewriting, delay and mock rules with sensitive values redacted.", InputSchema: empty, ReadOnly: true, Handler: toolHandler(func(_ context.Context, _ struct{}) (any, error) { return s.PublicRules(), nil })},
 		{Name: "rules_replace", Description: "Atomically replace all proxy rules. Requires startup --allow-rules. Each rule must name hosts; rules affect subsequent requests and can change upstream behavior. An empty rules array removes all rules.", InputSchema: object(map[string]any{"rules": map[string]any{"type": "array", "items": rule, "maxItems": 32}}, "rules"), Destructive: true, OpenWorld: true, Handler: toolHandler(func(_ context.Context, in RulesInput) (any, error) { return s.ReplaceRules(in) })},
